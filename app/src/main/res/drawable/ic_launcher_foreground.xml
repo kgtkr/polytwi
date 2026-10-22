@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Secondary account layer (shadow/echo in indigo/violet representing multi-profile Poly) -->
+    <group
+        android:translateX="-5"
+        android:translateY="-5">
+        <path
+            android:fillColor="#818CF8"
+            android:fillAlpha="0.30"
+            android:pathData="M52,33 L67,37 L54,43 Z" />
+        <path
+            android:fillColor="#818CF8"
+            android:fillAlpha="0.25"
+            android:pathData="M43,41 L52,33 L54,43 L45,49 Z" />
+        <path
+            android:fillColor="#6366F1"
+            android:fillAlpha="0.35"
+            android:pathData="M45,49 L54,43 L63,53 L47,61 Z" />
+        <path
+            android:fillColor="#818CF8"
+            android:fillAlpha="0.30"
+            android:pathData="M54,43 L79,38 L63,53 Z" />
+        <path
+            android:fillColor="#6366F1"
+            android:fillAlpha="0.25"
+            android:pathData="M63,53 L83,50 L59,64 Z" />
+        <path
+            android:fillColor="#4F46E5"
+            android:fillAlpha="0.30"
+            android:pathData="M59,64 L78,65 L50,71 Z" />
+        <path
+            android:fillColor="#4338CA"
+            android:fillAlpha="0.35"
+            android:pathData="M47,61 L63,53 L59,64 L50,71 L39,63 Z" />
+        <path
+            android:fillColor="#3730A3"
+            android:fillAlpha="0.35"
+            android:pathData="M39,63 L50,71 L31,75 Z" />
+    </group>
+
+    <!-- Primary Low-Poly Bird facets (Crystal Twitter Blue) -->
+    <!-- Beak & Upper Head -->
+    <path
+        android:fillColor="#BAE6FD"
+        android:pathData="M52,33 L67,37 L54,43 Z" />
+
+    <!-- Throat & Lower Head -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M43,41 L52,33 L54,43 L45,49 Z" />
+
+    <!-- Chest -->
+    <path
+        android:fillColor="#0EA5E9"
+        android:pathData="M45,49 L54,43 L63,53 L47,61 Z" />
+
+    <!-- Wing Top Feather -->
+    <path
+        android:fillColor="#60A5FA"
+        android:pathData="M54,43 L79,38 L63,53 Z" />
+
+    <!-- Wing Mid Feather -->
+    <path
+        android:fillColor="#2563EB"
+        android:pathData="M63,53 L83,50 L59,64 Z" />
+
+    <!-- Wing Lower Feather -->
+    <path
+        android:fillColor="#1D4ED8"
+        android:pathData="M59,64 L78,65 L50,71 Z" />
+
+    <!-- Belly -->
+    <path
+        android:fillColor="#0284C7"
+        android:pathData="M47,61 L63,53 L59,64 L50,71 L39,63 Z" />
+
+    <!-- Tail Feather -->
+    <path
+        android:fillColor="#1E40AF"
+        android:pathData="M39,63 L50,71 L31,75 Z" />
+
+</vector>

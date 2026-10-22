@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Secondary shadow/echo layer -->
+    <group
+        android:translateX="-5"
+        android:translateY="-5">
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.25"
+            android:pathData="M52,33 L67,37 L54,43 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.20"
+            android:pathData="M43,41 L52,33 L54,43 L45,49 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.25"
+            android:pathData="M45,49 L54,43 L63,53 L47,61 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.20"
+            android:pathData="M54,43 L79,38 L63,53 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.20"
+            android:pathData="M63,53 L83,50 L59,64 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.25"
+            android:pathData="M59,64 L78,65 L50,71 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.25"
+            android:pathData="M47,61 L63,53 L59,64 L50,71 L39,63 Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillAlpha="0.25"
+            android:pathData="M39,63 L50,71 L31,75 Z" />
+    </group>
+
+    <!-- Primary Bird facets -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.95"
+        android:pathData="M52,33 L67,37 L54,43 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.80"
+        android:pathData="M43,41 L52,33 L54,43 L45,49 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.85"
+        android:pathData="M45,49 L54,43 L63,53 L47,61 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.90"
+        android:pathData="M54,43 L79,38 L63,53 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.75"
+        android:pathData="M63,53 L83,50 L59,64 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.65"
+        android:pathData="M59,64 L78,65 L50,71 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.70"
+        android:pathData="M47,61 L63,53 L59,64 L50,71 L39,63 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.60"
+        android:pathData="M39,63 L50,71 L31,75 Z" />
+
+</vector>

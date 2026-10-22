@@ -1,0 +1,10 @@
+/.gradle/
+/.kotlin/
+/app/build/
+/build/
+plan.md
+local.properties
+*.jks
+*.keystore
+keystore.properties
+

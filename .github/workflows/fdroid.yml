@@ -1,0 +1,109 @@
+name: Deploy F-Droid Repository
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      custom_version:
+        description: 'Custom version name (Leave blank to use timestamp YYYY.MM.DD-HHMM)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Version
+        id: versioning
+        run: |
+          # versionCode is Unix timestamp in seconds (monotonically increasing, safely under 2^31 - 1)
+          V_CODE=$(date +%s)
+          
+          if [ "${{ github.event_name }}" = "push" ]; then
+            V_NAME="${{ github.ref_name }}"
+          elif [ -n "${{ github.event.inputs.custom_version }}" ]; then
+            V_NAME="${{ github.event.inputs.custom_version }}"
+          else
+            V_NAME="$(date -u +'%Y.%m.%d-%H%M')"
+          fi
+          
+          echo "version_name=$V_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$V_CODE" >> $GITHUB_OUTPUT
+          echo "Building PolyTwi version: $V_NAME (versionCode: $V_CODE)"
+
+      - name: Setup Nix Environment
+        uses: ./.github/actions/setup
+
+      - name: Restore Keystore from Secrets
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > polytwi-release.jks
+          cat <<EOF > keystore.properties
+          storeFile=../polytwi-release.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      - name: Build Release APK
+        run: |
+          gradle assembleRelease \
+            -PversionCode=${{ steps.versioning.outputs.version_code }} \
+            -PversionName=${{ steps.versioning.outputs.version_name }}
+
+      - name: Setup F-Droid Repository Structure
+        run: |
+          mkdir -p fdroid-site/fdroid/repo
+          cp app/build/outputs/apk/release/app-release.apk fdroid-site/fdroid/repo/polytwi-${{ steps.versioning.outputs.version_name }}.apk
+          
+          cat <<EOF > fdroid-site/fdroid/config.yml
+          repo_name: "PolyTwi Repository"
+          repo_description: "Unofficial multi-account PWA wrapper for X (Twitter)"
+          repo_url: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/fdroid/repo"
+          EOF
+
+      - name: Generate F-Droid Metadata
+        uses: docker://registry.gitlab.com/fdroid/fdroidserver:latest
+        with:
+          args: >
+            bash -c "
+            cd fdroid-site/fdroid &&
+            fdroid update --create-metadata --use-date-from-apks
+            "
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: fdroid-site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.versioning.outputs.version_name }}
+          name: PolyTwi ${{ steps.versioning.outputs.version_name }}
+          files: app/build/outputs/apk/release/app-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
