@@ -82,13 +82,9 @@ jobs:
           EOF
 
       - name: Generate F-Droid Metadata
-        uses: docker://registry.gitlab.com/fdroid/fdroidserver:latest
-        with:
-          args: >
-            bash -c "
-            cd fdroid-site/fdroid &&
-            fdroid update --create-metadata --use-date-from-apks
-            "
+        run: |
+          cd fdroid-site/fdroid
+          fdroid update --create-metadata --use-date-from-apks
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3

@@ -33,6 +33,7 @@
             androidSdk
             pkgs.jdk17
             pkgs.gradle
+            pkgs.fdroidserver
           ];
 
           shellHook = ''
