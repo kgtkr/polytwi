@@ -84,7 +84,7 @@ jobs:
       - name: Generate F-Droid Metadata
         run: |
           cd fdroid-site/fdroid
-          fdroid update --create-metadata --use-date-from-apks
+          fdroid update --create-metadata --use-date-from-apk
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
