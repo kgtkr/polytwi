@@ -2,14 +2,10 @@ name: Deploy F-Droid Repository
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      custom_version:
-        description: 'Custom version name (Leave blank to use timestamp YYYY.MM.DD-HHMM)'
-        required: false
-        default: ''
 
 permissions:
   contents: write
@@ -39,10 +35,8 @@ jobs:
           # versionCode is Unix timestamp in seconds (monotonically increasing, safely under 2^31 - 1)
           V_CODE=$(date +%s)
           
-          if [ "${{ github.event_name }}" = "push" ]; then
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             V_NAME="${{ github.ref_name }}"
-          elif [ -n "${{ github.event.inputs.custom_version }}" ]; then
-            V_NAME="${{ github.event.inputs.custom_version }}"
           else
             V_NAME="$(date -u +'%Y.%m.%d-%H%M')"
           fi
