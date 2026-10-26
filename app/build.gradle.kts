@@ -8,14 +8,29 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "net.kgtkr.polytwi"
     compileSdk = 34
+
+    val localPropertiesFile = rootProject.file("local.properties")
+    val localProperties = Properties()
+    if (localPropertiesFile.exists()) {
+        localProperties.load(FileInputStream(localPropertiesFile))
+    }
 
     val customVersionCode = project.findProperty("versionCode")?.toString()?.toIntOrNull()
         ?: System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
     val customVersionName = project.findProperty("versionName")?.toString()
         ?: System.getenv("VERSION_NAME") ?: "1.0"
+    val pushBridgeUrl = (project.findProperty("pushBridgeUrl")?.toString()
+        ?: System.getenv("PUSH_BRIDGE_URL")
+        ?: localProperties.getProperty("pushBridgeUrl")
+        ?: localProperties.getProperty("PUSH_BRIDGE_URL")
+        ?: "").trimEnd('/')
 
     defaultConfig {
         applicationId = "net.kgtkr.polytwi"
@@ -23,6 +38,8 @@ android {
         targetSdk = 34
         versionCode = customVersionCode
         versionName = customVersionName
+
+        buildConfigField("String", "PUSH_BRIDGE_URL", "\"$pushBridgeUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -85,6 +102,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
@@ -112,7 +130,7 @@ dependencies {
     // AndroidX Security Crypto (EncryptedSharedPreferences)
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
-    // OkHttp (WebSocket & HTTP)
+    // OkHttp (HTTP)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Kotlinx Serialization JSON
@@ -120,6 +138,11 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
+    // Firebase Cloud Messaging
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-messaging")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

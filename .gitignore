@@ -2,9 +2,9 @@
 /.kotlin/
 /app/build/
 /build/
-plan.md
+plan*.md
 local.properties
 *.jks
 *.keystore
 keystore.properties
-
+app/google-services.json

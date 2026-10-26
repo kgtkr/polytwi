@@ -420,6 +420,9 @@ class MainActivity : ComponentActivity() {
                 confirmButton = {
                     Button(
                         onClick = {
+                            target.channelId?.let { channelId ->
+                                app.pushBridgeClient.unregisterChannel(channelId)
+                            }
                             app.webViewPool.removeWebView(target.id)
                             if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
                                 ProfileStore.getInstance().deleteProfile(target.profileName)

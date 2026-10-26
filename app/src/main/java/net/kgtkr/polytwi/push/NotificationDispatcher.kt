@@ -39,8 +39,9 @@ class NotificationDispatcher(
             getOrCreateChannel(account.id, account.name)
         }
 
-        // 2. Clean up orphaned channels from deleted profiles
+        // 2. Clean up orphaned channels from deleted profiles and legacy foreground service channel
         try {
+            notificationManager.deleteNotificationChannel("autopush_service_channel")
             val existingChannels = notificationManager.notificationChannels ?: return
             for (channel in existingChannels) {
                 if (channel.id.startsWith("channel_account_") && channel.id !in activeChannelIds) {

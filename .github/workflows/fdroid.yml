@@ -64,7 +64,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Restore Keystore from Secrets
+      - name: Restore Keystore and Firebase Config from Secrets
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > polytwi-release.jks
           cat <<EOF > keystore.properties
@@ -73,8 +73,13 @@ jobs:
           keyAlias=${{ secrets.KEY_ALIAS }}
           keyPassword=${{ secrets.KEY_PASSWORD }}
           EOF
+          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" ]; then
+            echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > app/google-services.json
+          fi
 
       - name: Build Release APK
+        env:
+          PUSH_BRIDGE_URL: ${{ secrets.PUSH_BRIDGE_URL }}
         run: |
           gradle assembleRelease \
             -PversionCode=${{ steps.versioning.outputs.version_code }} \

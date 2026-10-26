@@ -26,8 +26,8 @@ import net.kgtkr.polytwi.injector.MediaBridge
 import net.kgtkr.polytwi.injector.PushJsBridge
 import net.kgtkr.polytwi.injector.PushPolyfillInjector
 import net.kgtkr.polytwi.model.Account
-import net.kgtkr.polytwi.push.AutopushClient
 import net.kgtkr.polytwi.push.NotificationDispatcher
+import net.kgtkr.polytwi.push.PushBridgeClient
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 
@@ -35,7 +35,7 @@ class WebViewPool(
     private val accountManager: AccountManager,
     private val controlPanelInjector: ControlPanelInjector,
     private val cpftConfigBridge: CpftConfigBridge,
-    private val autopushClient: AutopushClient,
+    private val pushBridgeClient: PushBridgeClient,
     private val notificationDispatcher: NotificationDispatcher,
     private val scope: CoroutineScope
 ) {
@@ -187,7 +187,7 @@ class WebViewPool(
         }
 
         // Add Push JS Bridge, Shared CPFT Config Bridge, and Media Bridge
-        val bridge = PushJsBridge(account.id, accountManager, autopushClient, notificationDispatcher, scope)
+        val bridge = PushJsBridge(account.id, accountManager, pushBridgeClient, notificationDispatcher, scope)
         val mediaBridge = MediaBridge(activityContext, scope)
         webView.addJavascriptInterface(bridge, "AndroidPushBridge")
         webView.addJavascriptInterface(cpftConfigBridge, "AndroidCpftBridge")

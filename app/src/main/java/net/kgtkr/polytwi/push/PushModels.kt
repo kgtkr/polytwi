@@ -1,25 +1,30 @@
 package net.kgtkr.polytwi.push
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 
 @Serializable
-data class AutopushMessage(
-    val messageType: String,
-    val uaid: String? = null,
-    val channelID: String? = null,
-    val status: Int? = null,
-    val pushEndpoint: String? = null,
-    val version: String? = null,
-    val data: String? = null,
-    val headers: Map<String, String>? = null,
-    val updates: List<AutopushUpdate>? = null
+data class RegisterChannelRequest(
+    val fcm_token: String,
+    val app_server_key: String
 )
 
 @Serializable
-data class AutopushUpdate(
-    val channelID: String,
-    val version: String
+data class RegisterChannelResponse(
+    val channel_id: String,
+    val push_endpoint: String,
+    val app_server_key: String
+)
+
+@Serializable
+data class SyncChannelsRequest(
+    val fcm_token: String,
+    val channel_ids: List<String>
+)
+
+@Serializable
+data class SyncChannelsResponse(
+    val active_channel_ids: List<String>,
+    val expired_channel_ids: List<String>
 )
 
 @Serializable
