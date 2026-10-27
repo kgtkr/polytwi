@@ -2,10 +2,32 @@ package net.kgtkr.polytwi.injector
 
 object PushPolyfillInjector {
 
-    const val JS_POLYFILL = """
+    fun buildPolyfillScript(bridgeToken: String): String = JS_POLYFILL_TEMPLATE.replace("__BRIDGE_TOKEN__", bridgeToken)
+
+    private const val JS_POLYFILL_TEMPLATE = """
     (function() {
         if (window.__webPushPolyfilled) return;
         window.__webPushPolyfilled = true;
+
+        const _bridgeToken = "__BRIDGE_TOKEN__";
+        const _pushBridge = window.AndroidPushBridge;
+        const _cpftBridge = window.AndroidCpftBridge;
+        try {
+            delete window.AndroidPushBridge;
+            delete window.AndroidCpftBridge;
+        } catch (_) {}
+        try {
+            Object.defineProperty(window, 'AndroidPushBridge', {
+                value: undefined,
+                writable: false,
+                configurable: true
+            });
+            Object.defineProperty(window, 'AndroidCpftBridge', {
+                value: undefined,
+                writable: false,
+                configurable: true
+            });
+        } catch (_) {}
 
         console.log("[WebPushPolyfill] Initializing Web Push, Dark Mode & CPFT polyfill");
 
@@ -21,8 +43,8 @@ object PushPolyfillInjector {
                 el.type = 'application/json';
                 let initialJson = '{}';
                 try {
-                    if (window.AndroidCpftBridge && window.AndroidCpftBridge.getAllConfig) {
-                        initialJson = window.AndroidCpftBridge.getAllConfig() || '{}';
+                    if (_cpftBridge && _cpftBridge.getAllConfig) {
+                        initialJson = _cpftBridge.getAllConfig(_bridgeToken) || '{}';
                     }
                 } catch (e) {
                     console.error("[CPFT] Failed to read initial config", e);
@@ -35,11 +57,11 @@ object PushPolyfillInjector {
 
         function syncDarkModeCookie() {
             try {
-                if (!window.AndroidCpftBridge || !window.AndroidCpftBridge.isDarkMode) return;
-                const isDark = Boolean(window.AndroidCpftBridge.isDarkMode());
+                if (!_cpftBridge || !_cpftBridge.isDarkMode) return;
+                const isDark = Boolean(_cpftBridge.isDarkMode(_bridgeToken));
                 let darkTheme = 'lightsOut';
                 try {
-                    const cfgStr = window.AndroidCpftBridge.getAllConfig ? window.AndroidCpftBridge.getAllConfig() : '{}';
+                    const cfgStr = _cpftBridge.getAllConfig ? _cpftBridge.getAllConfig(_bridgeToken) : '{}';
                     const cfg = JSON.parse(cfgStr);
                     if (cfg && cfg.darkModeTheme) {
                         darkTheme = cfg.darkModeTheme;
@@ -74,8 +96,8 @@ object PushPolyfillInjector {
             if (event.source !== window || !event.data) return;
             if (event.data.type === 'cpftConfigChange' && event.data.changes) {
                 try {
-                    if (window.AndroidCpftBridge && window.AndroidCpftBridge.mergeConfig) {
-                        window.AndroidCpftBridge.mergeConfig(JSON.stringify(event.data.changes));
+                    if (_cpftBridge && _cpftBridge.mergeConfig) {
+                        _cpftBridge.mergeConfig(_bridgeToken, JSON.stringify(event.data.changes));
                     }
                 } catch (e) {}
             }
@@ -97,8 +119,8 @@ object PushPolyfillInjector {
             const origMatchMedia = window.matchMedia.bind(window);
             window.matchMedia = function(query) {
                 const mql = origMatchMedia(query);
-                if (typeof query === 'string' && query.includes('prefers-color-scheme') && window.AndroidCpftBridge && window.AndroidCpftBridge.isDarkMode) {
-                    const isDark = Boolean(window.AndroidCpftBridge.isDarkMode());
+                if (typeof query === 'string' && query.includes('prefers-color-scheme') && _cpftBridge && _cpftBridge.isDarkMode) {
+                    const isDark = Boolean(_cpftBridge.isDarkMode(_bridgeToken));
                     const wantsDark = query.includes('dark');
                     const wantsLight = query.includes('light');
                     const matched = (wantsDark && isDark) || (wantsLight && !isDark);
@@ -121,9 +143,9 @@ object PushPolyfillInjector {
         if (typeof window.GM_getValue === 'undefined') {
             window.GM_getValue = function(key, defaultValue) {
                 try {
-                    if (window.AndroidCpftBridge && window.AndroidCpftBridge.get) {
+                    if (_cpftBridge && _cpftBridge.get) {
                         const defaultStr = typeof defaultValue !== 'undefined' ? JSON.stringify(defaultValue) : null;
-                        const res = window.AndroidCpftBridge.get(key, defaultStr);
+                        const res = _cpftBridge.get(_bridgeToken, key, defaultStr);
                         return res !== null && typeof res !== 'undefined' ? JSON.parse(res) : defaultValue;
                     }
                     const val = localStorage.getItem('cpft_' + key);
@@ -137,8 +159,8 @@ object PushPolyfillInjector {
             window.GM_setValue = function(key, value) {
                 try {
                     const jsonStr = JSON.stringify(value);
-                    if (window.AndroidCpftBridge && window.AndroidCpftBridge.set) {
-                        window.AndroidCpftBridge.set(key, jsonStr);
+                    if (_cpftBridge && _cpftBridge.set) {
+                        _cpftBridge.set(_bridgeToken, key, jsonStr);
                     }
                     localStorage.setItem('cpft_' + key, jsonStr);
                 } catch(e) {}
@@ -147,8 +169,8 @@ object PushPolyfillInjector {
         if (typeof window.GM_deleteValue === 'undefined') {
             window.GM_deleteValue = function(key) {
                 try {
-                    if (window.AndroidCpftBridge && window.AndroidCpftBridge.delete) {
-                        window.AndroidCpftBridge.delete(key);
+                    if (_cpftBridge && _cpftBridge.delete) {
+                        _cpftBridge.delete(_bridgeToken, key);
                     }
                     localStorage.removeItem('cpft_' + key);
                 } catch(e) {}
@@ -187,8 +209,8 @@ object PushPolyfillInjector {
         // Check if this account already has an active Push subscription
         function hasActiveNativeSubscription() {
             try {
-                if (window.AndroidPushBridge && window.AndroidPushBridge.getExistingSubscription) {
-                    const existing = window.AndroidPushBridge.getExistingSubscription();
+                if (_pushBridge && _pushBridge.getExistingSubscription) {
+                    const existing = _pushBridge.getExistingSubscription(_bridgeToken);
                     return Boolean(existing);
                 }
             } catch (e) {}
@@ -355,8 +377,8 @@ object PushPolyfillInjector {
         };
         PushSubscriptionMock.prototype.unsubscribe = function() {
             return new Promise(function(resolve) {
-                if (window.AndroidPushBridge && window.AndroidPushBridge.unsubscribe) {
-                    window.AndroidPushBridge.unsubscribe();
+                if (_pushBridge && _pushBridge.unsubscribe) {
+                    _pushBridge.unsubscribe(_bridgeToken);
                 }
                 currentNotificationPermission = 'default';
                 notifyPermissionChange();
@@ -384,12 +406,12 @@ object PushPolyfillInjector {
 
         PushManagerMock.prototype.getSubscription = function() {
             return new Promise(function(resolve) {
-                if (!window.AndroidPushBridge || !window.AndroidPushBridge.getExistingSubscription) {
+                if (!_pushBridge || !_pushBridge.getExistingSubscription) {
                     resolve(null);
                     return;
                 }
                 try {
-                    const existing = window.AndroidPushBridge.getExistingSubscription();
+                    const existing = _pushBridge.getExistingSubscription(_bridgeToken);
                     if (existing) {
                         const parsed = JSON.parse(existing);
                         currentNotificationPermission = 'granted';
@@ -405,7 +427,7 @@ object PushPolyfillInjector {
 
         PushManagerMock.prototype.subscribe = function(options) {
             return new Promise(function(resolve, reject) {
-                if (!window.AndroidPushBridge || !window.AndroidPushBridge.subscribe) {
+                if (!_pushBridge || !_pushBridge.subscribe) {
                     reject(new Error("AndroidPushBridge not available"));
                     return;
                 }
@@ -423,7 +445,7 @@ object PushPolyfillInjector {
                 }
 
                 try {
-                    const resultJson = window.AndroidPushBridge.subscribe(keyStr);
+                    const resultJson = _pushBridge.subscribe(_bridgeToken, keyStr);
                     if (resultJson) {
                         const parsed = JSON.parse(resultJson);
                         if (!parsed.appServerKey) parsed.appServerKey = keyStr;
@@ -453,8 +475,8 @@ object PushPolyfillInjector {
         function triggerShowNotification(title, options) {
             try {
                 const body = (options && options.body) ? String(options.body) : "";
-                if (window.AndroidPushBridge && window.AndroidPushBridge.showTestNotification) {
-                    window.AndroidPushBridge.showTestNotification(String(title || "X"), body);
+                if (_pushBridge && _pushBridge.showTestNotification) {
+                    _pushBridge.showTestNotification(_bridgeToken, String(title || "X"), body);
                 }
             } catch (e) {
                 console.error("[WebPushPolyfill] triggerShowNotification error", e);

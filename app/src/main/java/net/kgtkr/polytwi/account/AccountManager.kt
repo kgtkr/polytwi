@@ -13,21 +13,39 @@ import net.kgtkr.polytwi.model.Account
 import java.util.UUID
 
 class AccountManager(context: Context) {
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    companion object {
+        private const val PREFS_FILE = "encrypted_accounts_pref"
 
-    private val prefs: SharedPreferences = try {
-        EncryptedSharedPreferences.create(
-            context,
-            "encrypted_accounts_pref",
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (e: Exception) {
-        // Fallback to standard prefs if hardware keystore fails
-        context.getSharedPreferences("accounts_pref", Context.MODE_PRIVATE)
+        private fun createEncryptedPrefs(context: Context): SharedPreferences {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+
+            return try {
+                EncryptedSharedPreferences.create(
+                    context,
+                    PREFS_FILE,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("AccountManager", "EncryptedSharedPreferences corrupted, resetting...", e)
+                context.deleteSharedPreferences(PREFS_FILE)
+                EncryptedSharedPreferences.create(
+                    context,
+                    PREFS_FILE,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            }
+        }
+    }
+
+    private val prefs: SharedPreferences = createEncryptedPrefs(context).also {
+        // Clean up legacy unencrypted preferences file if it exists
+        context.deleteSharedPreferences("accounts_pref")
     }
     private val json = Json { ignoreUnknownKeys = true }
 

@@ -8,27 +8,55 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
-import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.widget.Toast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import net.kgtkr.polytwi.util.UrlValidator
 
 class MediaBridge(
     private val context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val bridgeToken: String,
+    private val currentUrlProvider: () -> String? = { null }
 ) {
     @JavascriptInterface
-    fun onImageLongPressed(imageUrl: String) {
+    fun onImageLongPressed(token: String?, imageUrl: String) {
+        if (bridgeToken.isEmpty() || token != bridgeToken) {
+            android.util.Log.w("MediaBridge", "Blocked onImageLongPressed with invalid bridge token")
+            return
+        }
+        val currentUrl = currentUrlProvider()
+        if (!UrlValidator.isAllowedWebUrl(currentUrl)) {
+            android.util.Log.w("MediaBridge", "Blocked onImageLongPressed from untrusted origin: $currentUrl")
+            return
+        }
+        if (!UrlValidator.isAllowedImageHost(imageUrl)) {
+            android.util.Log.w("MediaBridge", "Blocked onImageLongPressed for untrusted image host: $imageUrl")
+            return
+        }
         scope.launch(Dispatchers.Main) {
             showImageOptionsDialog(context, imageUrl)
         }
     }
 
     companion object {
-        const val JS_IMAGE_LONGPRESS_LISTENER = """
+        fun buildLongPressListenerScript(bridgeToken: String): String = """
             (function() {
+                const _bridgeToken = "$bridgeToken";
+                const _mediaBridge = window.AndroidMediaBridge;
+                try {
+                    delete window.AndroidMediaBridge;
+                } catch (_) {}
+                try {
+                    Object.defineProperty(window, 'AndroidMediaBridge', {
+                        value: undefined,
+                        writable: false,
+                        configurable: true
+                    });
+                } catch (_) {}
+
                 function findImageUrl(el) {
                     if (!el) return null;
                     if (el.tagName === 'IMG' && el.src) return el.src;
@@ -55,9 +83,9 @@ class MediaBridge(
                 document.addEventListener('contextmenu', function(e) {
                     let imgUrl = findImageUrl(e.target);
                     if (imgUrl && (imgUrl.includes('twimg.com') || imgUrl.startsWith('http'))) {
-                        if (window.AndroidMediaBridge) {
+                        if (_mediaBridge) {
                             e.preventDefault();
-                            window.AndroidMediaBridge.onImageLongPressed(imgUrl);
+                            _mediaBridge.onImageLongPressed(_bridgeToken, imgUrl);
                         }
                     }
                 }, true);
@@ -65,6 +93,9 @@ class MediaBridge(
         """
 
         fun showImageOptionsDialog(context: Context, rawUrl: String) {
+            if (!UrlValidator.isAllowedImageHost(rawUrl)) {
+                return
+            }
             val originalUrl = getOriginalQualityUrl(rawUrl)
 
             AlertDialog.Builder(context)
@@ -99,21 +130,31 @@ class MediaBridge(
 
         fun downloadImage(context: Context, url: String) {
             try {
+                if (!UrlValidator.isAllowedImageHost(url)) {
+                    Toast.makeText(context, "Invalid or untrusted image URL", Toast.LENGTH_SHORT).show()
+                    return
+                }
+
                 val uri = Uri.parse(url)
-                val format = uri.getQueryParameter("format") ?: "jpg"
-                val mediaId = uri.lastPathSegment ?: System.currentTimeMillis().toString()
-                val fileName = "twitter_${mediaId}_orig.$format"
+                val rawFormat = uri.getQueryParameter("format")?.lowercase() ?: "jpg"
+                val safeFormat = when (rawFormat) {
+                    "png" -> "png"
+                    "webp" -> "webp"
+                    "gif" -> "gif"
+                    "jpeg", "jpg" -> "jpg"
+                    else -> "jpg"
+                }
+
+                val rawMediaId = uri.lastPathSegment ?: System.currentTimeMillis().toString()
+                val safeMediaId = rawMediaId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                val fileName = "twitter_${safeMediaId}_orig.$safeFormat"
 
                 val request = DownloadManager.Request(uri).apply {
                     setTitle("Saving $fileName")
                     setDescription("Downloading original image from X")
                     setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                     setDestinationInExternalPublicDir(Environment.DIRECTORY_PICTURES, "PolyTwi/$fileName")
-
-                    val cookies = CookieManager.getInstance().getCookie(url)
-                    if (!cookies.isNullOrBlank()) {
-                        addRequestHeader("Cookie", cookies)
-                    }
+                    // Do not attach session cookies; public CDN images do not need authentication
                     addRequestHeader(
                         "User-Agent",
                         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
@@ -129,12 +170,14 @@ class MediaBridge(
         }
 
         private fun copyLink(context: Context, url: String) {
+            if (!UrlValidator.isAllowedImageHost(url)) return
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             clipboard?.setPrimaryClip(ClipData.newPlainText("Image Link", url))
             Toast.makeText(context, "Image link copied to clipboard", Toast.LENGTH_SHORT).show()
         }
 
         private fun openExternal(context: Context, url: String) {
+            if (!UrlValidator.isAllowedImageHost(url)) return
             try {
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK

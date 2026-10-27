@@ -16,6 +16,9 @@ import net.kgtkr.polytwi.account.AccountManager
 import net.kgtkr.polytwi.model.Account
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import net.kgtkr.polytwi.util.UrlValidator
+import java.io.FilterInputStream
+import java.io.IOException
 import java.net.URL
 
 class NotificationDispatcher(
@@ -79,10 +82,17 @@ class NotificationDispatcher(
 
         val rawTargetUrl = payload.data?.url ?: payload.data?.uri ?: "https://x.com/notifications"
         val targetUrl = resolveUrl(rawTargetUrl)
+        val authToken = PendingIntent.getBroadcast(
+            context,
+            0,
+            Intent(),
+            PendingIntent.FLAG_IMMUTABLE
+        )
         val intent = Intent().apply {
             setClassName(context.packageName, "net.kgtkr.polytwi.MainActivity")
             putExtra("EXTRA_ACCOUNT_ID", accountId)
             putExtra("EXTRA_TARGET_URL", targetUrl)
+            putExtra("EXTRA_AUTH_PI", authToken)
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
@@ -114,25 +124,59 @@ class NotificationDispatcher(
     }
 
     private fun fetchImageBitmap(urlStr: String): Bitmap? {
+        if (!UrlValidator.isAllowedImageHost(urlStr)) {
+            android.util.Log.w("NotificationDispatcher", "Rejected non-image or untrusted host: $urlStr")
+            return null
+        }
         return try {
             val request = Request.Builder().url(urlStr).build()
             okHttpClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
-                    response.body?.byteStream()?.use { BitmapFactory.decodeStream(it) }
+                    val body = response.body ?: return null
+                    val contentLength = body.contentLength()
+                    if (contentLength > 5 * 1024 * 1024) {
+                        return null
+                    }
+                    body.byteStream().use { stream ->
+                        val boundedStream = object : FilterInputStream(stream) {
+                            private var bytesRead = 0
+                            override fun read(): Int {
+                                val b = super.read()
+                                if (b != -1 && ++bytesRead > 5 * 1024 * 1024) {
+                                    throw IOException("Image payload exceeds maximum allowed size")
+                                }
+                                return b
+                            }
+                            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                                val n = super.read(b, off, len)
+                                if (n > 0) {
+                                    bytesRead += n
+                                    if (bytesRead > 5 * 1024 * 1024) {
+                                        throw IOException("Image payload exceeds maximum allowed size")
+                                    }
+                                }
+                                return n
+                            }
+                        }
+                        BitmapFactory.decodeStream(boundedStream)
+                    }
                 } else null
             }
         } catch (e: Exception) {
+            android.util.Log.w("NotificationDispatcher", "Failed to fetch image: ${e.message}")
             null
         }
     }
 
     private fun resolveUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim()
-        return when {
-            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+        val candidate = when {
+            trimmed.startsWith("https://") -> trimmed
+            trimmed.startsWith("http://") -> "https://" + trimmed.removePrefix("http://")
             trimmed.startsWith("//") -> "https:$trimmed"
             trimmed.startsWith("/") -> "https://x.com$trimmed"
             else -> "https://x.com/$trimmed"
         }
+        return if (UrlValidator.isAllowedWebUrl(candidate)) candidate else "https://x.com/notifications"
     }
 }

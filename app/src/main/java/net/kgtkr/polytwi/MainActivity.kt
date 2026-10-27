@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewFeature
+import net.kgtkr.polytwi.util.UrlValidator
 import kotlinx.coroutines.launch
 import net.kgtkr.polytwi.injector.CpftReleaseInfo
 import net.kgtkr.polytwi.model.Account
@@ -140,13 +141,28 @@ class MainActivity : ComponentActivity() {
         val targetUrl = intent?.getStringExtra("EXTRA_TARGET_URL")
 
         if (accountId != null) {
+            val authPi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableExtra("EXTRA_AUTH_PI", android.app.PendingIntent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra("EXTRA_AUTH_PI")
+            }
+            if (authPi?.creatorPackage != packageName) {
+                Log.w("MainActivity", "Rejected unauthenticated EXTRA_ACCOUNT_ID intent from external caller")
+                return
+            }
+
             app.accountManager.setActiveAccount(accountId)
             val account = app.accountManager.getAccountById(accountId)
             if (account != null && targetUrl != null) {
                 val resolvedUrl = resolveTargetUrl(targetUrl)
-                Log.d("MainActivity", "Opening notification URL: $resolvedUrl for account ${account.name}")
-                val webView = app.webViewPool.getOrCreateWebView(this@MainActivity, account, createChromeClient())
-                webView.loadUrl(resolvedUrl)
+                if (UrlValidator.isAllowedWebUrl(resolvedUrl)) {
+                    Log.d("MainActivity", "Opening notification URL: $resolvedUrl for account ${account.name}")
+                    val webView = app.webViewPool.getOrCreateWebView(this@MainActivity, account, createChromeClient())
+                    webView.loadUrl(resolvedUrl)
+                } else {
+                    Log.w("MainActivity", "Rejected untrusted notification URL: $resolvedUrl")
+                }
             }
             return
         }
@@ -155,6 +171,10 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == Intent.ACTION_VIEW && intent.data != null) {
             val deepLinkUrl = intent.dataString
             if (!deepLinkUrl.isNullOrBlank()) {
+                if (!UrlValidator.isAllowedWebUrl(deepLinkUrl)) {
+                    Log.w("MainActivity", "Rejected untrusted deep link URL: $deepLinkUrl")
+                    return
+                }
                 val accounts = app.accountManager.accounts.value
                 if (accounts.size <= 1) {
                     val targetAccount = accounts.firstOrNull() ?: app.accountManager.activeAccountId.value?.let { app.accountManager.getAccountById(it) }
@@ -174,7 +194,8 @@ class MainActivity : ComponentActivity() {
     private fun resolveTargetUrl(rawUrl: String): String {
         val trimmed = rawUrl.trim()
         return when {
-            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            trimmed.startsWith("https://") -> trimmed
+            trimmed.startsWith("http://") -> "https://" + trimmed.removePrefix("http://")
             trimmed.startsWith("//") -> "https:$trimmed"
             trimmed.startsWith("/") -> "https://x.com$trimmed"
             else -> "https://x.com/$trimmed"
@@ -475,16 +496,16 @@ class MainActivity : ComponentActivity() {
                         onClick = {
                             val target = inputUrl.trim()
                             if (target.isNotBlank()) {
-                                val resolved = when {
-                                    target.startsWith("http://") || target.startsWith("https://") -> target
-                                    target.startsWith("/") -> "https://x.com$target"
-                                    else -> "https://x.com/$target"
-                                }
-                                showNavigateDialog = false
-                                val account = accounts.find { it.id == activeAccountId }
-                                if (account != null) {
-                                    val webView = app.webViewPool.getOrCreateWebView(this@MainActivity, account, createChromeClient())
-                                    webView.loadUrl(resolved)
+                                val resolved = resolveTargetUrl(target)
+                                if (UrlValidator.isAllowedWebUrl(resolved)) {
+                                    showNavigateDialog = false
+                                    val account = accounts.find { it.id == activeAccountId }
+                                    if (account != null) {
+                                        val webView = app.webViewPool.getOrCreateWebView(this@MainActivity, account, createChromeClient())
+                                        webView.loadUrl(resolved)
+                                    }
+                                } else {
+                                    Toast.makeText(this@MainActivity, "Only X (Twitter) URLs are allowed", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -532,7 +553,9 @@ class MainActivity : ComponentActivity() {
                                             account,
                                             createChromeClient()
                                         )
-                                        webView.loadUrl(targetUrl)
+                                        if (UrlValidator.isAllowedWebUrl(targetUrl)) {
+                                            webView.loadUrl(targetUrl)
+                                        }
                                     }
                                     .padding(vertical = 4.dp),
                                 shape = MaterialTheme.shapes.small,

@@ -13,13 +13,16 @@ import net.kgtkr.polytwi.push.NotificationData
 import net.kgtkr.polytwi.push.NotificationDispatcher
 import net.kgtkr.polytwi.push.PushBridgeClient
 import net.kgtkr.polytwi.push.TwitterNotificationPayload
+import net.kgtkr.polytwi.util.UrlValidator
 
 class PushJsBridge(
     private val accountId: String,
     private val accountManager: AccountManager,
     private val pushBridgeClient: PushBridgeClient,
     private val notificationDispatcher: NotificationDispatcher,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val bridgeToken: String,
+    private val currentUrlProvider: () -> String? = { null }
 ) {
     companion object {
         // Default X.com VAPID public key (base64url)
@@ -27,8 +30,22 @@ class PushJsBridge(
             "BM5oEo0xDUpgylKDTlsd8pZmxQA1leYINiY-rSscWYK_3tWAkz4VMbtf1MLE_Yyd6iII6o-e3Q9TCN5vZMzVMEs"
     }
 
+    private fun isAuthorized(token: String?): Boolean {
+        if (bridgeToken.isEmpty() || token != bridgeToken) {
+            android.util.Log.w("PushJsBridge", "Blocked call with invalid bridge token")
+            return false
+        }
+        val currentUrl = currentUrlProvider()
+        if (!UrlValidator.isAllowedPushOrigin(currentUrl)) {
+            android.util.Log.w("PushJsBridge", "Blocked call from untrusted origin: $currentUrl")
+            return false
+        }
+        return true
+    }
+
     @JavascriptInterface
-    fun getExistingSubscription(): String? {
+    fun getExistingSubscription(token: String?): String? {
+        if (!isAuthorized(token)) return null
         val account = accountManager.getAccountById(accountId) ?: return null
         if (account.channelId != null && account.endpoint != null && account.p256dhBase64 != null && account.authBase64 != null) {
             val jsonMap = mapOf(
@@ -43,7 +60,8 @@ class PushJsBridge(
     }
 
     @JavascriptInterface
-    fun subscribe(appServerKeyBase64Url: String): String? {
+    fun subscribe(token: String?, appServerKeyBase64Url: String): String? {
+        if (!isAuthorized(token)) return null
         return runBlocking(Dispatchers.IO) {
             try {
                 var account = accountManager.getAccountById(accountId) ?: return@runBlocking null
@@ -93,7 +111,8 @@ class PushJsBridge(
     }
 
     @JavascriptInterface
-    fun unsubscribe(): Boolean {
+    fun unsubscribe(token: String?): Boolean {
+        if (!isAuthorized(token)) return false
         val account = accountManager.getAccountById(accountId) ?: return false
         val channelId = account.channelId
         if (channelId != null) {
@@ -105,7 +124,8 @@ class PushJsBridge(
     }
 
     @JavascriptInterface
-    fun showTestNotification(title: String, body: String) {
+    fun showTestNotification(token: String?, title: String, body: String) {
+        if (!isAuthorized(token)) return
         val account = accountManager.getAccountById(accountId)
         val accountName = account?.name ?: "X"
         scope.launch {

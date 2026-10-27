@@ -17,6 +17,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import net.kgtkr.polytwi.util.UrlValidator
 
 class CpftConfigBridge(private val context: Context) {
     companion object {
@@ -169,5 +170,63 @@ class CpftConfigBridge(private val context: Context) {
         if (updated.remove(key) != null) {
             saveConfigMap(updated)
         }
+    }
+}
+
+class WebViewCpftBridge(
+    private val delegate: CpftConfigBridge,
+    private val bridgeToken: String,
+    private val urlProvider: () -> String?
+) {
+    private fun isAuthorized(token: String?): Boolean {
+        return bridgeToken.isNotEmpty() && token == bridgeToken && UrlValidator.isAllowedCpftOrigin(urlProvider())
+    }
+
+    @JavascriptInterface
+    fun getAllConfig(token: String?): String {
+        if (!isAuthorized(token)) return "{}"
+        return delegate.getAllConfig()
+    }
+
+    @JavascriptInterface
+    fun mergeConfig(token: String?, changesJson: String) {
+        if (!isAuthorized(token)) return
+        delegate.mergeConfig(changesJson)
+    }
+
+    @JavascriptInterface
+    fun removeKeys(token: String?, keysJson: String) {
+        if (!isAuthorized(token)) return
+        delegate.removeKeys(keysJson)
+    }
+
+    @JavascriptInterface
+    fun clearAllConfig(token: String?): String {
+        if (!isAuthorized(token)) return "{}"
+        return delegate.clearAllConfig()
+    }
+
+    @JavascriptInterface
+    fun isDarkMode(token: String?): Boolean {
+        if (!isAuthorized(token)) return false
+        return delegate.isDarkMode()
+    }
+
+    @JavascriptInterface
+    fun get(token: String?, key: String, defaultValueJson: String?): String? {
+        if (!isAuthorized(token)) return defaultValueJson
+        return delegate.get(key, defaultValueJson)
+    }
+
+    @JavascriptInterface
+    fun set(token: String?, key: String, valueJson: String) {
+        if (!isAuthorized(token)) return
+        delegate.set(key, valueJson)
+    }
+
+    @JavascriptInterface
+    fun delete(token: String?, key: String) {
+        if (!isAuthorized(token)) return
+        delegate.delete(key)
     }
 }

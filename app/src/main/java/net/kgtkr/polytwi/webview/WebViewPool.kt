@@ -3,6 +3,7 @@ package net.kgtkr.polytwi.webview
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -25,11 +26,13 @@ import net.kgtkr.polytwi.injector.CpftConfigBridge
 import net.kgtkr.polytwi.injector.MediaBridge
 import net.kgtkr.polytwi.injector.PushJsBridge
 import net.kgtkr.polytwi.injector.PushPolyfillInjector
+import net.kgtkr.polytwi.injector.WebViewCpftBridge
 import net.kgtkr.polytwi.model.Account
 import net.kgtkr.polytwi.push.NotificationDispatcher
 import net.kgtkr.polytwi.push.PushBridgeClient
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 class WebViewPool(
     private val accountManager: AccountManager,
@@ -145,6 +148,8 @@ class WebViewPool(
             databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
             setSupportMultipleWindows(false)
+            allowFileAccess = false
+            allowContentAccess = false
 
             // Adjust User-Agent: remove '; wv' and 'Version/X.X' to disguise as normal Chrome Mobile
             val defaultUa = userAgentString
@@ -158,17 +163,31 @@ class WebViewPool(
         applyDarkModeSettings(activityContext, webView)
         syncNightModeCookie(activityContext, webView)
 
+        val currentLoadedUrl = AtomicReference("https://x.com")
+        val bridgeToken = java.util.UUID.randomUUID().toString()
+
         webView.webChromeClient = chromeClient
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                currentLoadedUrl.set(url)
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                currentLoadedUrl.set(url)
+            }
+
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                 val url = request?.url ?: return false
-                return handleUrlNavigation(view?.context ?: activityContext, url)
+                val isMainFrame = request.isForMainFrame
+                return handleUrlNavigation(view?.context ?: activityContext, url, isMainFrame)
             }
 
             @Deprecated("Deprecated in Java")
             override fun shouldOverrideUrlLoading(view: WebView?, urlStr: String?): Boolean {
                 val url = urlStr?.let { Uri.parse(it) } ?: return false
-                return handleUrlNavigation(view?.context ?: activityContext, url)
+                return handleUrlNavigation(view?.context ?: activityContext, url, isMainFrame = true)
             }
         }
 
@@ -186,11 +205,13 @@ class WebViewPool(
             false
         }
 
-        // Add Push JS Bridge, Shared CPFT Config Bridge, and Media Bridge
-        val bridge = PushJsBridge(account.id, accountManager, pushBridgeClient, notificationDispatcher, scope)
-        val mediaBridge = MediaBridge(activityContext, scope)
+        // Add Push JS Bridge, Shared CPFT Config Bridge, and Media Bridge with origin & token validation
+        val urlProvider = { currentLoadedUrl.get() }
+        val bridge = PushJsBridge(account.id, accountManager, pushBridgeClient, notificationDispatcher, scope, bridgeToken, urlProvider)
+        val mediaBridge = MediaBridge(activityContext, scope, bridgeToken, urlProvider)
+        val wrappedCpftBridge = WebViewCpftBridge(cpftConfigBridge, bridgeToken, urlProvider)
         webView.addJavascriptInterface(bridge, "AndroidPushBridge")
-        webView.addJavascriptInterface(cpftConfigBridge, "AndroidCpftBridge")
+        webView.addJavascriptInterface(wrappedCpftBridge, "AndroidCpftBridge")
         webView.addJavascriptInterface(mediaBridge, "AndroidMediaBridge")
 
         // Inject Push Polyfill, Media Listener & CPFT script at document start
@@ -204,8 +225,16 @@ class WebViewPool(
             )
 
             // Inject push polyfill & image long-press listener
-            WebViewCompat.addDocumentStartJavaScript(webView, PushPolyfillInjector.JS_POLYFILL, allowedOrigins)
-            WebViewCompat.addDocumentStartJavaScript(webView, MediaBridge.JS_IMAGE_LONGPRESS_LISTENER, allowedOrigins)
+            WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                PushPolyfillInjector.buildPolyfillScript(bridgeToken),
+                allowedOrigins
+            )
+            WebViewCompat.addDocumentStartJavaScript(
+                webView,
+                MediaBridge.buildLongPressListenerScript(bridgeToken),
+                allowedOrigins
+            )
 
             // Inject Control Panel for Twitter synchronously before loadUrl
             scope.launch(Dispatchers.Main) {
@@ -231,29 +260,36 @@ class WebViewPool(
         }
     }
 
-    private fun handleUrlNavigation(context: Context, uri: Uri): Boolean {
-        val host = uri.host?.lowercase() ?: return false
+    private fun handleUrlNavigation(context: Context, uri: Uri, isMainFrame: Boolean): Boolean {
+        val scheme = uri.scheme?.lowercase() ?: return true
+        val host = uri.host?.lowercase() ?: return true
 
-        // Allow common in-app navigation (x.com, twitter.com, t.co, authentication)
-        val isInternal = host == "x.com" || host.endsWith(".x.com") ||
-                host == "twitter.com" || host.endsWith(".twitter.com") ||
-                host == "t.co" || host == "accounts.google.com" ||
-                host == "appleid.apple.com"
+        // Only HTTPS navigation is allowed to remain within the WebView
+        if (scheme == "https") {
+            val isInternal = host == "x.com" || host.endsWith(".x.com") ||
+                    host == "twitter.com" || host.endsWith(".twitter.com") ||
+                    host == "t.co" || host == "accounts.google.com" ||
+                    host == "appleid.apple.com"
 
-        if (isInternal) {
-            return false // Stay inside WebView
-        }
-
-        // External link: open in external browser / Custom Tabs
-        return try {
-            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (isInternal) {
+                return false // Stay inside WebView
             }
-            context.startActivity(intent)
-            true
-        } catch (e: Exception) {
-            false
         }
+
+        // External link: open in external browser only for main frame navigation (http/https schemes)
+        if (isMainFrame && (scheme == "http" || scheme == "https")) {
+            try {
+                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                android.util.Log.w("WebViewPool", "Failed to open external browser for $uri", e)
+            }
+        }
+
+        // Block all non-internal or non-HTTPS URLs from loading inside the privileged WebView
+        return true
     }
 
     fun removeWebView(accountId: String) {

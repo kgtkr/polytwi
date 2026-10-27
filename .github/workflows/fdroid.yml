@@ -59,16 +59,21 @@ jobs:
             ${{ runner.os }}-gradle-
 
       - name: Restore Keystore and Firebase Config from Secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > polytwi-release.jks
-          cat <<EOF > keystore.properties
+          echo "$KEYSTORE_BASE64" | base64 -d > polytwi-release.jks
+          cat <<'EOF' > keystore.properties
           storeFile=../polytwi-release.jks
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
           EOF
-          if [ -n "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" ]; then
-            echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > app/google-services.json
+          printf "storePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n" \
+            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" >> keystore.properties
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 -d > app/google-services.json
           fi
 
       - name: Build Release APK
@@ -80,6 +85,10 @@ jobs:
             -PversionName=${{ steps.versioning.outputs.version_name }}
 
       - name: Setup F-Droid Repository Structure
+        env:
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           mkdir -p fdroid-site/fdroid/repo
           cp app/build/outputs/apk/release/app-release.apk fdroid-site/fdroid/repo/polytwi-${{ steps.versioning.outputs.version_name }}.apk
@@ -89,10 +98,9 @@ jobs:
           repo_description: "Unofficial multi-account PWA wrapper for X (Twitter)"
           repo_url: "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/fdroid/repo"
           keystore: "$GITHUB_WORKSPACE/polytwi-release.jks"
-          repo_keyalias: "${{ secrets.KEY_ALIAS }}"
-          keystorepass: "${{ secrets.KEYSTORE_PASSWORD }}"
-          keypass: "${{ secrets.KEY_PASSWORD }}"
           EOF
+          printf "repo_keyalias: \"%s\"\nkeystorepass: \"%s\"\nkeypass: \"%s\"\n" \
+            "$KEY_ALIAS" "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" >> fdroid-site/fdroid/config.yml
 
       - name: Generate F-Droid Metadata
         run: |

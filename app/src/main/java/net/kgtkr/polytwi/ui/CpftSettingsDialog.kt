@@ -43,6 +43,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import net.kgtkr.polytwi.injector.WebViewCpftBridge
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import kotlinx.coroutines.launch
@@ -150,6 +151,8 @@ fun CpftSettingsDialog(
                         CircularProgressIndicator()
                     }
                 } else {
+                    val bridgeToken = remember { java.util.UUID.randomUUID().toString() }
+                    val currentOptionsUrl = remember { java.util.concurrent.atomic.AtomicReference(OPTIONS_BASE_URL) }
                     AndroidView(
                         modifier = Modifier
                             .weight(1f)
@@ -175,7 +178,10 @@ fun CpftSettingsDialog(
                                 }
                                 settings.javaScriptEnabled = true
                                 settings.domStorageEnabled = true
-                                addJavascriptInterface(cpftConfigBridge, "AndroidCpftBridge")
+                                settings.allowFileAccess = false
+                                settings.allowContentAccess = false
+                                val settingsBridge = WebViewCpftBridge(cpftConfigBridge, bridgeToken) { currentOptionsUrl.get() }
+                                addJavascriptInterface(settingsBridge, "AndroidCpftBridge")
 
                                 webChromeClient = object : WebChromeClient() {
                                     override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -192,15 +198,58 @@ fun CpftSettingsDialog(
                         },
                         update = { webView ->
                             webView.webViewClient = object : WebViewClient() {
+                                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                                    super.onPageStarted(view, url, favicon)
+                                    currentOptionsUrl.set(url)
+                                }
+
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView?,
+                                    request: WebResourceRequest?
+                                ): Boolean {
+                                    val url = request?.url ?: return true
+                                    val scheme = url.scheme?.lowercase()
+                                    if (scheme == "https" && url.host?.lowercase() == "cpft-options.local") {
+                                        return false
+                                    }
+                                    if (request.isForMainFrame && (scheme == "http" || scheme == "https")) {
+                                        try {
+                                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, url).apply {
+                                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            (view?.context ?: context).startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Log.w("CpftOptionsWebView", "Failed to open external link: $url", e)
+                                        }
+                                    }
+                                    return true
+                                }
+
                                 override fun shouldInterceptRequest(
                                     view: WebView?,
                                     request: WebResourceRequest?
                                 ): WebResourceResponse? {
-                                    val url = request?.url ?: return null
-                                    if (url.host != "cpft-options.local") return null
+                                    val url = request?.url ?: return WebResourceResponse(
+                                        "text/plain",
+                                        "UTF-8",
+                                        403,
+                                        "Forbidden",
+                                        emptyMap(),
+                                        ByteArrayInputStream(ByteArray(0))
+                                    )
+                                    if (url.scheme?.lowercase() != "https" || url.host?.lowercase() != "cpft-options.local") {
+                                        return WebResourceResponse(
+                                            "text/plain",
+                                            "UTF-8",
+                                            403,
+                                            "Forbidden",
+                                            emptyMap(),
+                                            ByteArrayInputStream(ByteArray(0))
+                                        )
+                                    }
                                     return when (url.path) {
                                         "/options.html" -> {
-                                            val fullHtml = buildInjectedOptionsHtml(bundle, isDark)
+                                            val fullHtml = buildInjectedOptionsHtml(bundle, isDark, bridgeToken)
                                             WebResourceResponse(
                                                 "text/html",
                                                 "UTF-8",
@@ -228,7 +277,14 @@ fun CpftSettingsDialog(
                                                 ByteArrayInputStream(TWITTER_BIRD_SVG.toByteArray(Charsets.UTF_8))
                                             )
                                         }
-                                        else -> null
+                                        else -> WebResourceResponse(
+                                            "text/plain",
+                                            "UTF-8",
+                                            404,
+                                            "Not Found",
+                                            emptyMap(),
+                                            ByteArrayInputStream(ByteArray(0))
+                                        )
                                     }
                                 }
                             }
@@ -282,9 +338,10 @@ fun CpftSettingsDialog(
     }
 }
 
-private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean): String {
+private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean, bridgeToken: String): String {
     val quotedJa = JSONObject.quote(bundle.messagesJa)
     val quotedEn = JSONObject.quote(bundle.messagesEn)
+    val quotedToken = JSONObject.quote(bridgeToken)
 
     val polyfillAndStyle = """
         <style>
@@ -331,6 +388,19 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean)
         </style>
         <script>
         (function() {
+            const _cpftBridge = window.AndroidCpftBridge;
+            const _bridgeToken = $quotedToken;
+            try {
+                delete window.AndroidCpftBridge;
+            } catch (_) {}
+            try {
+                Object.defineProperty(window, 'AndroidCpftBridge', {
+                    value: undefined,
+                    writable: false,
+                    configurable: true
+                });
+            } catch (_) {}
+
             let messagesJa = {};
             let messagesEn = {};
             try { messagesJa = JSON.parse($quotedJa); } catch (e) {}
@@ -378,8 +448,8 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean)
 
             function readAllFromBridge() {
                 try {
-                    if (window.AndroidCpftBridge && window.AndroidCpftBridge.getAllConfig) {
-                        return JSON.parse(window.AndroidCpftBridge.getAllConfig() || '{"version":"mobile"}');
+                    if (_cpftBridge && _cpftBridge.getAllConfig) {
+                        return JSON.parse(_cpftBridge.getAllConfig(_bridgeToken) || '{"version":"mobile"}');
                     }
                 } catch (e) {
                     console.error('[CPFT Options] readAllFromBridge error', e);
@@ -437,8 +507,8 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean)
                             };
                         });
                         try {
-                            if (window.AndroidCpftBridge && window.AndroidCpftBridge.mergeConfig) {
-                                window.AndroidCpftBridge.mergeConfig(JSON.stringify(items));
+                            if (_cpftBridge && _cpftBridge.mergeConfig) {
+                                _cpftBridge.mergeConfig(_bridgeToken, JSON.stringify(items));
                             }
                         } catch (e) {
                             console.error('[CPFT Options] mergeConfig error', e);
@@ -460,8 +530,8 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean)
                         }
                     });
                     try {
-                        if (window.AndroidCpftBridge && window.AndroidCpftBridge.removeKeys) {
-                            window.AndroidCpftBridge.removeKeys(JSON.stringify(keyList));
+                        if (_cpftBridge && _cpftBridge.removeKeys) {
+                            _cpftBridge.removeKeys(_bridgeToken, JSON.stringify(keyList));
                         }
                     } catch (e) {
                         console.error('[CPFT Options] removeKeys error', e);
@@ -474,8 +544,8 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean)
                 },
                 clear: function(callback) {
                     try {
-                        if (window.AndroidCpftBridge && window.AndroidCpftBridge.clearAllConfig) {
-                            window.AndroidCpftBridge.clearAllConfig();
+                        if (_cpftBridge && _cpftBridge.clearAllConfig) {
+                            _cpftBridge.clearAllConfig(_bridgeToken);
                         }
                     } catch (e) {}
                     if (typeof callback === 'function') {
