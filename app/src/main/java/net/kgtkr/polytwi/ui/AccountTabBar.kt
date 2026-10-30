@@ -45,6 +45,7 @@ fun AccountTabBar(
     onNavigateToUrl: () -> Unit,
     onReload: () -> Unit,
     onOpenCpftSettings: () -> Unit,
+    onOpenSessionTransfer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -168,6 +169,13 @@ fun AccountTabBar(
                         onClick = {
                             overflowMenuExpanded = false
                             onOpenCpftSettings()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Session Transfer (Import / Export)") },
+                        onClick = {
+                            overflowMenuExpanded = false
+                            onOpenSessionTransfer()
                         }
                     )
                 }

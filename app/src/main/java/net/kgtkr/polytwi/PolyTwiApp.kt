@@ -10,6 +10,7 @@ import net.kgtkr.polytwi.injector.ControlPanelInjector
 import net.kgtkr.polytwi.injector.CpftConfigBridge
 import net.kgtkr.polytwi.push.NotificationDispatcher
 import net.kgtkr.polytwi.push.PushBridgeClient
+import net.kgtkr.polytwi.transfer.SessionTransferManager
 import net.kgtkr.polytwi.webview.WebViewPool
 import okhttp3.OkHttpClient
 
@@ -42,6 +43,16 @@ class PolyTwiApp : Application() {
 
     val webViewPool by lazy {
         WebViewPool(accountManager, controlPanelInjector, cpftConfigBridge, pushBridgeClient, notificationDispatcher, appScope)
+    }
+
+    val sessionTransferManager by lazy {
+        SessionTransferManager(
+            context = this,
+            accountManager = accountManager,
+            cpftConfigBridge = cpftConfigBridge,
+            pushBridgeClient = pushBridgeClient,
+            webViewPool = webViewPool
+        )
     }
 
     override fun onCreate() {

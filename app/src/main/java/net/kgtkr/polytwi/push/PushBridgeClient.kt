@@ -45,7 +45,10 @@ class PushBridgeClient(
         }
     }
 
-    suspend fun registerChannel(appServerKeyBase64Url: String): Triple<String, String, String>? =
+    suspend fun registerChannel(
+        appServerKeyBase64Url: String,
+        channelId: String? = null
+    ): Triple<String, String, String>? =
         withContext(Dispatchers.IO) {
             if (baseUrl.isBlank()) {
                 Log.e(TAG, "BuildConfig.PUSH_BRIDGE_URL is not configured")
@@ -61,7 +64,8 @@ class PushBridgeClient(
             try {
                 val reqBodyObj = RegisterChannelRequest(
                     fcm_token = fcmToken,
-                    app_server_key = appServerKeyBase64Url
+                    app_server_key = appServerKeyBase64Url,
+                    channel_id = channelId?.takeIf { it.isNotBlank() }
                 )
                 val bodyJson = json.encodeToString(reqBodyObj)
                 val request = Request.Builder()
@@ -96,14 +100,21 @@ class PushBridgeClient(
         if (baseUrl.isBlank() || channelId.isBlank()) return
         scope.launch(Dispatchers.IO) {
             try {
+                val fcmToken = getFcmToken()
+                val url = if (!fcmToken.isNullOrBlank()) {
+                    val encodedToken = java.net.URLEncoder.encode(fcmToken, "UTF-8")
+                    "$baseUrl/v1/channels/$channelId?fcm_token=$encodedToken"
+                } else {
+                    "$baseUrl/v1/channels/$channelId"
+                }
                 val request = Request.Builder()
-                    .url("$baseUrl/v1/channels/$channelId")
+                    .url(url)
                     .delete()
                     .build()
 
                 okHttpClient.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {
-                        Log.i(TAG, "Unregistered channel $channelId from bridge")
+                        Log.i(TAG, "Unregistered channel $channelId from bridge (device token)")
                     } else {
                         Log.w(
                             TAG,
@@ -125,7 +136,9 @@ class PushBridgeClient(
                 // Reset any legacy account that has an endpoint without a channelId
                 accounts.forEach { acc ->
                     if (acc.endpoint != null && acc.channelId.isNullOrBlank()) {
-                        accountManager.updateAccount(acc.copy(endpoint = null, channelId = null))
+                        accountManager.updateAccount(
+                            acc.copy(endpoint = null, channelId = null, pushEnabled = false)
+                        )
                     }
                 }
 
@@ -153,25 +166,33 @@ class PushBridgeClient(
                     }
 
                     val syncResp = json.decodeFromString<SyncChannelsResponse>(respText)
-                    if (syncResp.expired_channel_ids.isNotEmpty()) {
-                        val expiredSet = syncResp.expired_channel_ids.toSet()
-                        Log.w(
-                            TAG,
-                            "Bridge reported expired channels: $expiredSet. Clearing local endpoints for re-subscription."
-                        )
-                        accountManager.accounts.value.forEach { acc ->
-                            if (acc.channelId in expiredSet) {
+                    val expiredSet = syncResp.expired_channel_ids.toSet()
+                    val endpointsMap = syncResp.channel_endpoints
+
+                    accountManager.accounts.value.forEach { acc ->
+                        val cid = acc.channelId ?: return@forEach
+                        if (cid in expiredSet) {
+                            Log.w(
+                                TAG,
+                                "Bridge reported expired channel $cid for ${acc.name}. Clearing local endpoint for re-subscription."
+                            )
+                            accountManager.updateAccount(
+                                acc.copy(endpoint = null, pushEnabled = false)
+                            )
+                        } else {
+                            val latestEndpoint = endpointsMap[cid]
+                            if (!latestEndpoint.isNullOrBlank() && latestEndpoint != acc.endpoint) {
                                 accountManager.updateAccount(
-                                    acc.copy(channelId = null, endpoint = null)
+                                    acc.copy(endpoint = latestEndpoint)
                                 )
                             }
                         }
-                    } else {
-                        Log.d(
-                            TAG,
-                            "Synced ${syncResp.active_channel_ids.size} active channel(s) with bridge"
-                        )
                     }
+
+                    Log.d(
+                        TAG,
+                        "Synced ${syncResp.active_channel_ids.size} active channel(s) with bridge"
+                    )
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error syncing channels with bridge", e)
@@ -183,9 +204,9 @@ class PushBridgeClient(
         val account = accountManager.getAccountByChannelId(channelId) ?: return
         Log.w(
             TAG,
-            "Channel $channelId expired on Autopush for account ${account.name}. Resetting subscription."
+            "Channel $channelId expired on Autopush for account ${account.name}. Resetting subscription endpoint."
         )
-        accountManager.updateAccount(account.copy(channelId = null, endpoint = null))
+        accountManager.updateAccount(account.copy(endpoint = null, pushEnabled = false))
     }
 
     suspend fun handleNotificationPayload(fcmData: Map<String, String>) {

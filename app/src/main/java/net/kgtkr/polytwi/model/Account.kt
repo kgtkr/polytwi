@@ -12,5 +12,6 @@ data class Account(
     val p256dhBase64: String? = null,
     val authBase64: String? = null,
     val privateKeyPkcs8Base64: String? = null,
-    val appServerKeyBase64: String? = null
+    val appServerKeyBase64: String? = null,
+    val pushEnabled: Boolean = true
 )

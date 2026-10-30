@@ -47,7 +47,7 @@ class PushJsBridge(
     fun getExistingSubscription(token: String?): String? {
         if (!isAuthorized(token)) return null
         val account = accountManager.getAccountById(accountId) ?: return null
-        if (account.channelId != null && account.endpoint != null && account.p256dhBase64 != null && account.authBase64 != null) {
+        if (account.pushEnabled && account.channelId != null && account.endpoint != null && account.p256dhBase64 != null && account.authBase64 != null) {
             val jsonMap = mapOf(
                 "endpoint" to account.endpoint,
                 "p256dh" to account.p256dhBase64,
@@ -67,31 +67,35 @@ class PushJsBridge(
                 var account = accountManager.getAccountById(accountId) ?: return@runBlocking null
                 val effectiveServerKey = appServerKeyBase64Url.takeIf { it.isNotBlank() } ?: DEFAULT_X_VAPID_KEY
 
-                // Ensure key pair exists
+                // Ensure key pair and stable logical channelId exist
+                val logicalChannelId = account.channelId?.takeIf { it.isNotBlank() }
+                    ?: java.util.UUID.randomUUID().toString()
+
                 if (account.p256dhBase64 == null || account.authBase64 == null || account.privateKeyPkcs8Base64 == null) {
                     val keys = WebPushCryptoManager.generateKeys()
                     account = account.copy(
+                        channelId = logicalChannelId,
                         p256dhBase64 = keys.p256dhBase64Url,
                         authBase64 = keys.authBase64Url,
                         privateKeyPkcs8Base64 = keys.privateKeyPkcs8Base64,
                         appServerKeyBase64 = effectiveServerKey
                     )
                     accountManager.updateAccount(account)
+                } else if (account.channelId != logicalChannelId) {
+                    account = account.copy(channelId = logicalChannelId)
+                    accountManager.updateAccount(account)
                 }
 
-                // Clean up previous channel if re-subscribing
-                val oldChannelId = account.channelId
-                val result = pushBridgeClient.registerChannel(effectiveServerKey)
+                // Register or reuse logicalChannelId on the bridge without destroying other devices' subscriptions
+                val result = pushBridgeClient.registerChannel(effectiveServerKey, logicalChannelId)
                 if (result != null) {
                     val (channelId, endpoint, _) = result
-                    if (!oldChannelId.isNullOrBlank() && oldChannelId != channelId) {
-                        pushBridgeClient.unregisterChannel(oldChannelId)
-                    }
 
                     val updatedAccount = account.copy(
                         channelId = channelId,
                         endpoint = endpoint,
-                        appServerKeyBase64 = effectiveServerKey
+                        appServerKeyBase64 = effectiveServerKey,
+                        pushEnabled = true
                     )
                     accountManager.updateAccount(updatedAccount)
 
@@ -114,10 +118,10 @@ class PushJsBridge(
     fun unsubscribe(token: String?): Boolean {
         if (!isAuthorized(token)) return false
         val account = accountManager.getAccountById(accountId) ?: return false
-        val channelId = account.channelId
-        if (channelId != null) {
-            pushBridgeClient.unregisterChannel(channelId)
-            accountManager.updateAccount(account.copy(channelId = null, endpoint = null))
+        if (account.channelId != null || account.endpoint != null) {
+            // Keep channelId, endpoint, and WebPush keys intact so re-enabling notifications
+            // or multi-device sharing continues using the same logical channel and keys.
+            accountManager.updateAccount(account.copy(pushEnabled = false))
             return true
         }
         return false

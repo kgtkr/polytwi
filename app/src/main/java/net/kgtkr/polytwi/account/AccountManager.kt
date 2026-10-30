@@ -160,6 +160,67 @@ class AccountManager(context: Context) {
         return _accounts.value.find { it.id == id }
     }
 
+    /**
+     * Imports accounts from a device transfer bundle.
+     * Returns the list of previous accounts that were removed (if replaceExisting is true)
+     * so the caller can clean up their WebViews/profiles without unregistering shared bridge channels.
+     */
+    fun importAccounts(
+        importedAccounts: List<Account>,
+        importedActiveId: String?,
+        replaceExisting: Boolean
+    ): List<Account> {
+        if (importedAccounts.isEmpty()) return emptyList()
+
+        val current = _accounts.value
+        val removedAccounts = mutableListOf<Account>()
+
+        val finalAccounts = if (replaceExisting) {
+            val importedIds = importedAccounts.map { it.id }.toSet()
+            removedAccounts.addAll(current.filter { it.id !in importedIds })
+            importedAccounts
+        } else {
+            val merged = current.toMutableList()
+            for (incoming in importedAccounts) {
+                val existingIndex = merged.indexOfFirst { it.id == incoming.id }
+                if (existingIndex >= 0) {
+                    merged[existingIndex] = incoming
+                } else {
+                    merged.add(incoming)
+                }
+            }
+            merged
+        }
+
+        _accounts.value = finalAccounts
+        val targetActiveId = when {
+            importedActiveId != null && finalAccounts.any { it.id == importedActiveId } -> importedActiveId
+            _activeAccountId.value != null && finalAccounts.any { it.id == _activeAccountId.value } -> _activeAccountId.value!!
+            else -> finalAccounts.first().id
+        }
+        _activeAccountId.value = targetActiveId
+        _unreadAccountIds.value = emptySet()
+        saveAccountsInternal(finalAccounts)
+        prefs.edit().putString("active_account_id", targetActiveId).apply()
+        return removedAccounts
+    }
+
+    fun getSavedTransferKeyPair(): Pair<String, String>? {
+        val pub = prefs.getString("transfer_public_key_b64url", null)
+        val priv = prefs.getString("transfer_private_key_pkcs8_b64", null)
+        if (!pub.isNullOrBlank() && !priv.isNullOrBlank()) {
+            return pub to priv
+        }
+        return null
+    }
+
+    fun saveTransferKeyPair(publicKeyBase64Url: String, privateKeyPkcs8Base64: String) {
+        prefs.edit()
+            .putString("transfer_public_key_b64url", publicKeyBase64Url)
+            .putString("transfer_private_key_pkcs8_b64", privateKeyPkcs8Base64)
+            .apply()
+    }
+
     private fun saveAccountsInternal(list: List<Account>) {
         val serialized = json.encodeToString(list)
         prefs.edit().putString("accounts_list", serialized).apply()

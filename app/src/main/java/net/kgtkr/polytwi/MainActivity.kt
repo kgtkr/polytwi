@@ -65,6 +65,7 @@ import net.kgtkr.polytwi.model.Account
 import net.kgtkr.polytwi.ui.AccountTabBar
 import net.kgtkr.polytwi.ui.CpftSettingsDialog
 import net.kgtkr.polytwi.ui.CpftUpdateDialog
+import net.kgtkr.polytwi.ui.SessionTransferDialog
 
 class MainActivity : ComponentActivity() {
     private val app by lazy { application as PolyTwiApp }
@@ -266,6 +267,7 @@ class MainActivity : ComponentActivity() {
         var showRenameDialog by remember { mutableStateOf<Account?>(null) }
         var showDeleteDialog by remember { mutableStateOf<Account?>(null) }
         var showCpftSettingsDialog by remember { mutableStateOf(false) }
+        var showSessionTransferDialog by remember { mutableStateOf(false) }
         var showNavigateDialog by remember { mutableStateOf(false) }
         var pendingCpftUpdate by remember { mutableStateOf<CpftReleaseInfo?>(null) }
         var isApplyingCpftUpdate by remember { mutableStateOf(false) }
@@ -292,7 +294,8 @@ class MainActivity : ComponentActivity() {
                 onCopyUrl = { copyCurrentUrl(activeAccountId, accounts) },
                 onNavigateToUrl = { showNavigateDialog = true },
                 onReload = { reloadCurrentPage(activeAccountId, accounts) },
-                onOpenCpftSettings = { showCpftSettingsDialog = true }
+                onOpenCpftSettings = { showCpftSettingsDialog = true },
+                onOpenSessionTransfer = { showSessionTransferDialog = true }
             )
 
             // WebView Pool Container
@@ -309,13 +312,21 @@ class MainActivity : ComponentActivity() {
                     },
                     update = { container ->
                         // Synchronize child views with WebViewPool
-                        accounts.forEach { account ->
+                        val activeWebViews = accounts.map { account ->
                             val wv = app.webViewPool.getOrCreateWebView(this@MainActivity, account, createChromeClient())
                             if (wv.parent !== container) {
                                 (wv.parent as? ViewGroup)?.removeView(wv)
                                 container.addView(wv)
                             }
                             wv.visibility = if (account.id == activeAccountId) View.VISIBLE else View.GONE
+                            wv
+                        }.toSet()
+
+                        for (i in container.childCount - 1 downTo 0) {
+                            val child = container.getChildAt(i)
+                            if (child !in activeWebViews) {
+                                container.removeViewAt(i)
+                            }
                         }
                     }
                 )
@@ -328,6 +339,14 @@ class MainActivity : ComponentActivity() {
                 controlPanelInjector = app.controlPanelInjector,
                 cpftConfigBridge = app.cpftConfigBridge,
                 onDismiss = { showCpftSettingsDialog = false }
+            )
+        }
+
+        // Session Transfer (Import / Export) Dialog
+        if (showSessionTransferDialog) {
+            SessionTransferDialog(
+                transferManager = app.sessionTransferManager,
+                onDismiss = { showSessionTransferDialog = false }
             )
         }
 

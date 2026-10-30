@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class RegisterChannelRequest(
     val fcm_token: String,
-    val app_server_key: String
+    val app_server_key: String,
+    val channel_id: String? = null
 )
 
 @Serializable
@@ -24,7 +25,8 @@ data class SyncChannelsRequest(
 @Serializable
 data class SyncChannelsResponse(
     val active_channel_ids: List<String>,
-    val expired_channel_ids: List<String>
+    val expired_channel_ids: List<String>,
+    val channel_endpoints: Map<String, String> = emptyMap()
 )
 
 @Serializable
