@@ -133,7 +133,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.0")
 
     // AndroidX Security Crypto (EncryptedSharedPreferences)
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.security:security-crypto:1.1.0")
 
     // OkHttp (HTTP)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
