@@ -268,7 +268,7 @@ class WebViewPool(
         if (scheme == "https") {
             val isInternal = host == "x.com" || host.endsWith(".x.com") ||
                     host == "twitter.com" || host.endsWith(".twitter.com") ||
-                    host == "t.co" || host == "accounts.google.com" ||
+                    host == "accounts.google.com" ||
                     host == "appleid.apple.com"
 
             if (isInternal) {
