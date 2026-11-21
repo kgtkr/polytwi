@@ -34,7 +34,60 @@ object PushPolyfillInjector {
         // Default X.com VAPID key (base64url)
         const DEFAULT_VAPID_KEY = "BM5oEo0xDUpgylKDTlsd8pZmxQA1leYINiY-rSscWYK_3tWAkz4VMbtf1MLE_Yyd6iII6o-e3Q9TCN5vZMzVMEs";
 
-        // 1. Setup CPFT <script id="cpftSettings"> and Dark Mode Cookie Sync
+        const PAGE_SCRIPT_CONFIG_KEYS = new Set([
+            'debug',
+            'debugLogGetElementStats',
+            'debugLogTimelineStats',
+            'enabled',
+            'settings'
+        ]);
+        let cpftChannel = null;
+
+        function readCpftConfigObject() {
+            try {
+                if (_cpftBridge && _cpftBridge.getAllConfig) {
+                    return JSON.parse(_cpftBridge.getAllConfig(_bridgeToken) || '{}') || {};
+                }
+            } catch (e) {
+                console.error("[CPFT] Failed to read config", e);
+            }
+            return {};
+        }
+
+        function filterPageScriptConfig(obj) {
+            const out = {};
+            if (!obj || typeof obj !== 'object') return out;
+            Object.keys(obj).forEach(function(k) {
+                if (PAGE_SCRIPT_CONFIG_KEYS.has(k)) {
+                    out[k] = obj[k];
+                }
+            });
+            return out;
+        }
+
+        function syncLoadingLogoSettings(config) {
+            try {
+                if (config && Object.prototype.hasOwnProperty.call(config, 'enabled')) {
+                    const enabled = config.enabled !== undefined ? config.enabled : true;
+                    if (localStorage.cpftEnabled !== String(enabled)) {
+                        localStorage.cpftEnabled = String(enabled);
+                    }
+                }
+                if (config && Object.prototype.hasOwnProperty.call(config, 'settings')) {
+                    const revertXBranding = (config.settings && config.settings.revertXBranding !== undefined)
+                        ? config.settings.revertXBranding
+                        : true;
+                    if (localStorage.cpftRevertXBranding !== String(revertXBranding)) {
+                        localStorage.cpftRevertXBranding = String(revertXBranding);
+                    }
+                    if (localStorage.cpftReplaceLogo != null) {
+                        localStorage.removeItem('cpftReplaceLogo');
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // 1. Setup CPFT <script id="cpftSettings"> (pre-v4.99 compat) and Dark Mode Cookie Sync
         function ensureCpftSettingsElement() {
             let el = document.querySelector('script#cpftSettings');
             if (!el) {
@@ -61,9 +114,10 @@ object PushPolyfillInjector {
                 const isDark = Boolean(_cpftBridge.isDarkMode(_bridgeToken));
                 let darkTheme = 'lightsOut';
                 try {
-                    const cfgStr = _cpftBridge.getAllConfig ? _cpftBridge.getAllConfig(_bridgeToken) : '{}';
-                    const cfg = JSON.parse(cfgStr);
-                    if (cfg && cfg.darkModeTheme) {
+                    const cfg = readCpftConfigObject();
+                    if (cfg && cfg.settings && cfg.settings.darkModeTheme) {
+                        darkTheme = cfg.settings.darkModeTheme;
+                    } else if (cfg && cfg.darkModeTheme) {
                         darkTheme = cfg.darkModeTheme;
                     }
                 } catch (e) {}
@@ -91,9 +145,45 @@ object PushPolyfillInjector {
             ensureCpftSettingsElement();
         });
 
-        // Listen for config changes emitted by CPFT script.js
+        // Listen for CPFT script.js init (v4.99+ BroadcastChannel) and legacy cpftConfigChange
         window.addEventListener('message', function(event) {
             if (event.source !== window || !event.data) return;
+            if (event.data.type === 'init' && event.data.channelName) {
+                if (cpftChannel) return;
+                try {
+                    cpftChannel = new BroadcastChannel(event.data.channelName);
+                    cpftChannel.addEventListener('message', function(chEvent) {
+                        const changes = chEvent && chEvent.data;
+                        if (!changes || typeof changes !== 'object') return;
+                        try {
+                            const payload = {};
+                            Object.keys(changes).forEach(function(k) {
+                                if (k === 'settings' && changes.settings && typeof changes.settings === 'object') {
+                                    const current = readCpftConfigObject();
+                                    const curSettings = (current && current.settings && typeof current.settings === 'object')
+                                        ? current.settings
+                                        : {};
+                                    payload.settings = Object.assign({}, curSettings, changes.settings);
+                                } else {
+                                    payload[k] = changes[k];
+                                }
+                            });
+                            if (_cpftBridge && _cpftBridge.mergeConfig && Object.keys(payload).length > 0) {
+                                _cpftBridge.mergeConfig(_bridgeToken, JSON.stringify(payload));
+                            }
+                        } catch (e) {
+                            console.error("[CPFT] Failed to store config change from page script", e);
+                        }
+                    });
+                    const storedConfig = readCpftConfigObject();
+                    const pageConfig = filterPageScriptConfig(storedConfig);
+                    syncLoadingLogoSettings(Object.assign({ enabled: true, settings: {} }, pageConfig));
+                    cpftChannel.postMessage({ type: 'initial', config: pageConfig });
+                } catch (e) {
+                    console.error("[CPFT] Failed to initialize BroadcastChannel", e);
+                }
+                return;
+            }
             if (event.data.type === 'cpftConfigChange' && event.data.changes) {
                 try {
                     if (_cpftBridge && _cpftBridge.mergeConfig) {
@@ -108,6 +198,14 @@ object PushPolyfillInjector {
             try {
                 const el = ensureCpftSettingsElement();
                 el.textContent = changesJsonStr;
+                try {
+                    const parsed = JSON.parse(changesJsonStr);
+                    const pageChanges = filterPageScriptConfig(parsed);
+                    syncLoadingLogoSettings(pageChanges);
+                    if (cpftChannel && Object.keys(pageChanges).length > 0) {
+                        cpftChannel.postMessage({ type: 'change', config: pageChanges });
+                    }
+                } catch (e) {}
                 syncDarkModeCookie();
             } catch (e) {
                 console.error("[CPFT] Failed to apply config changes", e);

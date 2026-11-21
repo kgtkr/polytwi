@@ -29,22 +29,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine Version
-        id: versioning
-        run: |
-          # versionCode is Unix timestamp in seconds (monotonically increasing, safely under 2^31 - 1)
-          V_CODE=$(date +%s)
-          
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            V_NAME="${{ github.ref_name }}"
-          else
-            V_NAME="$(date -u +'%Y.%m.%d-%H%M')"
-          fi
-          
-          echo "version_name=$V_NAME" >> $GITHUB_OUTPUT
-          echo "version_code=$V_CODE" >> $GITHUB_OUTPUT
-          echo "Building PolyTwi version: $V_NAME (versionCode: $V_CODE)"
-
       - name: Setup Nix Environment
         uses: ./.github/actions/setup
 
@@ -77,12 +61,21 @@ jobs:
           fi
 
       - name: Build Release APK
+        id: build
         env:
           PUSH_BRIDGE_URL: ${{ secrets.PUSH_BRIDGE_URL }}
         run: |
-          gradle assembleRelease \
-            -PversionCode=${{ steps.versioning.outputs.version_code }} \
-            -PversionName=${{ steps.versioning.outputs.version_name }}
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            gradle assembleRelease -PversionName=${{ github.ref_name }}
+          else
+            gradle assembleRelease
+          fi
+
+          V_NAME=$(jq -r '.elements[0].versionName' app/build/outputs/apk/release/output-metadata.json)
+          V_CODE=$(jq -r '.elements[0].versionCode' app/build/outputs/apk/release/output-metadata.json)
+          echo "version_name=$V_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$V_CODE" >> $GITHUB_OUTPUT
+          echo "Built PolyTwi version: $V_NAME (versionCode: $V_CODE)"
 
       - name: Setup F-Droid Repository Structure
         env:
@@ -91,7 +84,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           mkdir -p fdroid-site/fdroid/repo
-          cp app/build/outputs/apk/release/app-release.apk fdroid-site/fdroid/repo/polytwi-${{ steps.versioning.outputs.version_name }}.apk
+          cp app/build/outputs/apk/release/app-release.apk fdroid-site/fdroid/repo/polytwi-${{ steps.build.outputs.version_name }}.apk
           
           cat <<EOF > fdroid-site/fdroid/config.yml
           repo_name: "PolyTwi Repository"
@@ -119,8 +112,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.versioning.outputs.version_name }}
-          name: PolyTwi ${{ steps.versioning.outputs.version_name }}
+          tag_name: ${{ steps.build.outputs.version_name }}
+          name: PolyTwi ${{ steps.build.outputs.version_name }}
           files: app/build/outputs/apk/release/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

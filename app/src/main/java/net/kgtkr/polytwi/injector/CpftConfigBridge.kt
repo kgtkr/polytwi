@@ -25,9 +25,50 @@ class CpftConfigBridge(private val context: Context) {
         private const val KEY_CONFIG_JSON = "__cpft_config_json__"
 
         // Schema-less initial seed: CPFT script.js and options.js maintain their own
-        // defaultConfig/mobileConfig, so only seed "version": "mobile" when storage is empty.
+        // DEFAULT_SETTINGS/defaultConfig, so seed mobile layout and empty settings object.
         private val INITIAL_SEED_CONFIG: Map<String, JsonElement> = mapOf(
-            "version" to JsonPrimitive("mobile")
+            "lastLayout" to JsonPrimitive("mobile"),
+            "settings" to JsonObject(emptyMap())
+        )
+
+        private val EXTENSION_CONFIG_KEYS = setOf(
+            "accountEmail",
+            "collapsedGroups",
+            "debug",
+            "debugLogGetElementStats",
+            "debugLogTimelineStats",
+            "enabled",
+            "lastLayout",
+            "lastSiteVersion",
+            "lastSyncTime",
+            "optionsStyle",
+            "pendingSettingsPatch",
+            "pendingStorageMigration",
+            "serverLastModified",
+            "settings",
+            "settingsSyncPhase",
+            "subscription",
+            "syncError",
+            "syncSettings",
+            "tab",
+            "token"
+        )
+
+        private val LEGACY_KEY_RENAMES = mapOf(
+            "disableNflFeatures" to "disableUsSportFeatures",
+            "hideGrokNav" to "hideGrok",
+            "hideJobsNav" to "hideJobs",
+            "hideMessagesDrawer" to "hideChatDrawer",
+            "hideWhoToFollowEtc" to "hideSuggestedContentTimeline",
+            "alwaysUseLatestTweets" to "defaultToFollowing",
+            "hideMoreTweets" to "hideDiscoverSuggestions",
+            "hideTotalTweetsMetrics" to "hideProfileHeaderMetrics",
+            "hideVerifiedNotificationsTab" to "hideVerifiedTabs",
+            "replaceLogo" to "revertXBranding",
+            "hideTwitterBlueReplies" to "hidePremiumReplies",
+            "hideTwitterBlueUpsells" to "hidePremiumUpsells",
+            "showBlueReplyFollowersCount" to "showPremiumReplyFollowersCount",
+            "showBlueReplyFollowersCountAmount" to "showPremiumReplyFollowersCountAmount"
         )
     }
 
@@ -51,6 +92,65 @@ class CpftConfigBridge(private val context: Context) {
             } catch (_: Exception) {
             }
         }
+
+        // Migrate legacy pre-v4.99 flat config keys into the nested `settings` object
+        val existingSettings = (merged["settings"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
+        val legacyKeys = merged.keys.filter { it !in EXTENSION_CONFIG_KEYS }
+        if (legacyKeys.isNotEmpty()) {
+            val layout = (merged["lastLayout"] as? JsonPrimitive)?.content
+                ?: (merged["version"] as? JsonPrimitive)?.content
+                ?: "mobile"
+            if (!merged.containsKey("lastLayout") && (layout == "mobile" || layout == "desktop")) {
+                merged["lastLayout"] = JsonPrimitive(layout)
+            }
+            if (!existingSettings.containsKey("hideChatNav") &&
+                (merged.containsKey("hideChatNav") || merged.containsKey("hideMessagesBottomNavItem"))
+            ) {
+                val chatVal = if (layout == "mobile") merged["hideMessagesBottomNavItem"] else merged["hideChatNav"]
+                if (chatVal != null) {
+                    existingSettings["hideChatNav"] = chatVal
+                }
+            }
+            for (key in legacyKeys) {
+                val value = merged.remove(key) ?: continue
+                if (key == "version" || key == "hideChatNav" || key == "hideMessagesBottomNavItem") {
+                    continue
+                }
+                when (key) {
+                    "listRetweets" -> {
+                        if (!existingSettings.containsKey("hideListRetweets")) {
+                            val str = (value as? JsonPrimitive)?.content
+                            existingSettings["hideListRetweets"] = JsonPrimitive(str == "hide")
+                        }
+                    }
+                    "sortFollowing" -> {
+                        if (!existingSettings.containsKey("defaultFollowingToRecent")) {
+                            val str = (value as? JsonPrimitive)?.content
+                            existingSettings["defaultFollowingToRecent"] = JsonPrimitive(str == "mostRecent")
+                        }
+                    }
+                    "twitterBlueChecks" -> {
+                        if (!existingSettings.containsKey("premiumBlueChecks")) {
+                            val str = (value as? JsonPrimitive)?.content
+                            existingSettings["premiumBlueChecks"] =
+                                if (str == "dim") JsonPrimitive("replace") else value
+                        }
+                    }
+                    else -> {
+                        val targetKey = LEGACY_KEY_RENAMES[key] ?: key
+                        if (!existingSettings.containsKey(targetKey)) {
+                            existingSettings[targetKey] = value
+                        }
+                    }
+                }
+            }
+            merged["settings"] = JsonObject(existingSettings)
+            val serialized = json.encodeToString(JsonObject(merged))
+            prefs.edit().putString(KEY_CONFIG_JSON, serialized).apply()
+        } else if (merged["settings"] !is JsonObject) {
+            merged["settings"] = JsonObject(existingSettings)
+        }
+
         return merged
     }
 
@@ -69,6 +169,11 @@ class CpftConfigBridge(private val context: Context) {
     }
 
     fun getString(key: String, default: String = ""): String {
+        val settingsObj = _configFlow.value["settings"] as? JsonObject
+        val nestedPrim = settingsObj?.get(key) as? JsonPrimitive
+        if (nestedPrim != null && nestedPrim.isString) {
+            return nestedPrim.content
+        }
         val prim = _configFlow.value[key] as? JsonPrimitive ?: return default
         return if (prim.isString) prim.content else default
     }

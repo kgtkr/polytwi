@@ -247,12 +247,19 @@ fun CpftSettingsDialog(
                                             ByteArrayInputStream(ByteArray(0))
                                         )
                                     }
-                                    return when (url.path) {
+                                    val path = url.path
+                                    val corsHeaders = mapOf(
+                                        "Access-Control-Allow-Origin" to "https://cpft-options.local"
+                                    )
+                                    return when (path) {
                                         "/options.html" -> {
                                             val fullHtml = buildInjectedOptionsHtml(bundle, isDark, bridgeToken)
                                             WebResourceResponse(
                                                 "text/html",
                                                 "UTF-8",
+                                                200,
+                                                "OK",
+                                                corsHeaders,
                                                 ByteArrayInputStream(fullHtml.toByteArray(Charsets.UTF_8))
                                             )
                                         }
@@ -260,6 +267,9 @@ fun CpftSettingsDialog(
                                             WebResourceResponse(
                                                 "text/css",
                                                 "UTF-8",
+                                                200,
+                                                "OK",
+                                                corsHeaders,
                                                 ByteArrayInputStream(bundle.optionsCss.toByteArray(Charsets.UTF_8))
                                             )
                                         }
@@ -267,6 +277,9 @@ fun CpftSettingsDialog(
                                             WebResourceResponse(
                                                 "application/javascript",
                                                 "UTF-8",
+                                                200,
+                                                "OK",
+                                                corsHeaders,
                                                 ByteArrayInputStream(bundle.optionsJs.toByteArray(Charsets.UTF_8))
                                             )
                                         }
@@ -274,17 +287,34 @@ fun CpftSettingsDialog(
                                             WebResourceResponse(
                                                 "image/svg+xml",
                                                 "UTF-8",
+                                                200,
+                                                "OK",
+                                                corsHeaders,
                                                 ByteArrayInputStream(TWITTER_BIRD_SVG.toByteArray(Charsets.UTF_8))
                                             )
                                         }
-                                        else -> WebResourceResponse(
-                                            "text/plain",
-                                            "UTF-8",
-                                            404,
-                                            "Not Found",
-                                            emptyMap(),
-                                            ByteArrayInputStream(ByteArray(0))
-                                        )
+                                        else -> {
+                                            val moduleContent = path?.let { bundle.moduleFiles[it] }
+                                            if (moduleContent != null) {
+                                                WebResourceResponse(
+                                                    "application/javascript",
+                                                    "UTF-8",
+                                                    200,
+                                                    "OK",
+                                                    corsHeaders,
+                                                    ByteArrayInputStream(moduleContent.toByteArray(Charsets.UTF_8))
+                                                )
+                                            } else {
+                                                WebResourceResponse(
+                                                    "text/plain",
+                                                    "UTF-8",
+                                                    404,
+                                                    "Not Found",
+                                                    emptyMap(),
+                                                    ByteArrayInputStream(ByteArray(0))
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -342,8 +372,31 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean,
     val quotedJa = JSONObject.quote(bundle.messagesJa)
     val quotedEn = JSONObject.quote(bundle.messagesEn)
     val quotedToken = JSONObject.quote(bridgeToken)
+    val manifestVersion = bundle.version.removePrefix("v").ifBlank { "4.99.2" }
+    val quotedManifestVersion = JSONObject.quote(manifestVersion)
+    val isV499Plus = bundle.optionsHtml.contains("""type="module"""")
 
-    val polyfillAndStyle = """
+    val styleBlock = if (isV499Plus) {
+        """
+        <style>
+            :root {
+                color-scheme: ${if (isDark) "dark" else "light"};
+            }
+            html, body {
+                min-width: 0 !important;
+                max-width: 100vw !important;
+                overflow-x: hidden;
+            }
+            body.browserAction {
+                min-width: 0 !important;
+            }
+            .firefoxSizer {
+                display: none !important;
+            }
+        </style>
+        """.trimIndent()
+    } else {
+        """
         <style>
             :root {
                 color-scheme: ${if (isDark) "dark" else "light"};
@@ -386,10 +439,16 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean,
                 accent-color: #1d9bf0;
             }
         </style>
+        """.trimIndent()
+    }
+
+    val polyfillAndStyle = """
+        $styleBlock
         <script>
         (function() {
             const _cpftBridge = window.AndroidCpftBridge;
             const _bridgeToken = $quotedToken;
+            const _manifestVersion = $quotedManifestVersion;
             try {
                 delete window.AndroidCpftBridge;
             } catch (_) {}
@@ -449,12 +508,12 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean,
             function readAllFromBridge() {
                 try {
                     if (_cpftBridge && _cpftBridge.getAllConfig) {
-                        return JSON.parse(_cpftBridge.getAllConfig(_bridgeToken) || '{"version":"mobile"}');
+                        return JSON.parse(_cpftBridge.getAllConfig(_bridgeToken) || '{"lastLayout":"mobile","settings":{}}');
                     }
                 } catch (e) {
                     console.error('[CPFT Options] readAllFromBridge error', e);
                 }
-                return { version: 'mobile' };
+                return { lastLayout: 'mobile', settings: {} };
             }
 
             const onChangedEvent = {
@@ -556,6 +615,31 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean,
                 onChanged: onChangedEvent
             };
 
+            function handleRuntimeMessage(message, callback) {
+                let response = {};
+                try {
+                    if (message && message.type === 'SET_SETTINGS') {
+                        const current = readAllFromBridge();
+                        const currentSettings = (current && current.settings && typeof current.settings === 'object' && !Array.isArray(current.settings))
+                            ? current.settings
+                            : {};
+                        const incoming = (message.settings && typeof message.settings === 'object') ? message.settings : {};
+                        const nextSettings = message.replace === true
+                            ? Object.assign({}, incoming)
+                            : Object.assign({}, currentSettings, incoming);
+                        localArea.set({ settings: nextSettings });
+                        response = {};
+                    }
+                } catch (e) {
+                    console.error('[CPFT Options] sendMessage error', e);
+                    response = { error: String(e && e.message ? e.message : e) };
+                }
+                if (typeof callback === 'function') {
+                    setTimeout(function() { callback(response); }, 0);
+                }
+                return Promise.resolve(response);
+            }
+
             window.chrome = window.chrome || {};
             window.chrome.i18n = {
                 getMessage: getMessage,
@@ -566,11 +650,52 @@ private fun buildInjectedOptionsHtml(bundle: CpftOptionsBundle, isDark: Boolean,
                 sync: localArea,
                 onChanged: onChangedEvent
             };
-            window.chrome.runtime = window.chrome.runtime || {
+            window.chrome.runtime = Object.assign({}, window.chrome.runtime, {
                 lastError: null,
-                sendMessage: function() { return Promise.resolve(); },
+                getManifest: function() {
+                    return {
+                        manifest_version: 3,
+                        version: _manifestVersion,
+                        host_permissions: []
+                    };
+                },
+                sendMessage: function(message, optionsOrCallback, maybeCallback) {
+                    const cb = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback;
+                    return handleRuntimeMessage(message, cb);
+                },
                 onMessage: { addListener: function() {}, removeListener: function() {} },
-                getURL: function(path) { return path; }
+                openOptionsPage: function() { return Promise.resolve(); },
+                getURL: function(path) {
+                    if (!path) return 'https://cpft-options.local/';
+                    return path.startsWith('/') ? 'https://cpft-options.local' + path : 'https://cpft-options.local/' + path;
+                }
+            });
+            window.chrome.tabs = window.chrome.tabs || {
+                query: function(queryInfo, callback) {
+                    const tabs = [{ id: 1, active: true }];
+                    if (typeof callback === 'function') {
+                        setTimeout(function() { callback(tabs); }, 0);
+                    }
+                    return Promise.resolve(tabs);
+                },
+                update: function(tabId, updateProperties, callback) {
+                    if (updateProperties && updateProperties.url) {
+                        window.location.href = updateProperties.url;
+                    }
+                    if (typeof callback === 'function') {
+                        setTimeout(function() { callback({ id: tabId }); }, 0);
+                    }
+                    return Promise.resolve({ id: tabId });
+                },
+                create: function(createProperties, callback) {
+                    if (createProperties && createProperties.url) {
+                        window.location.href = createProperties.url;
+                    }
+                    if (typeof callback === 'function') {
+                        setTimeout(function() { callback({ id: 2 }); }, 0);
+                    }
+                    return Promise.resolve({ id: 2 });
+                }
             };
             window.browser = window.chrome;
         })();

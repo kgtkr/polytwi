@@ -12,11 +12,13 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 data class CpftOptionsBundle(
+    val version: String,
     val optionsHtml: String,
     val optionsJs: String,
     val optionsCss: String,
     val messagesJa: String,
-    val messagesEn: String
+    val messagesEn: String,
+    val moduleFiles: Map<String, String> = emptyMap()
 )
 
 data class CpftReleaseInfo(
@@ -33,7 +35,7 @@ class ControlPanelInjector(
 ) {
     companion object {
         private const val TAG = "ControlPanelInjector"
-        const val DEFAULT_FALLBACK_TAG = "v4.25.1"
+        const val DEFAULT_FALLBACK_TAG = "v4.99.2"
         private const val GITHUB_RELEASES_API =
             "https://api.github.com/repos/insin/control-panel-for-twitter/releases/latest"
         private const val RAW_BASE_URL =
@@ -51,7 +53,16 @@ class ControlPanelInjector(
         private const val FILE_MESSAGES_JA = "_locales/ja/messages.json"
         private const val FILE_MESSAGES_EN = "_locales/en/messages.json"
 
-        private val ALL_REMOTE_FILES = listOf(
+        // ES module files imported by options.js in CPFT v4.99+
+        private val OPTIONS_MODULE_FILES = listOf(
+            "options-components.js" to "cpft_options_components.js",
+            "default-settings.js" to "cpft_default_settings.js",
+            "ext-shared.js" to "cpft_ext_shared.js",
+            "schemas.js" to "cpft_schemas.js",
+            "settings.js" to "cpft_settings.js"
+        )
+
+        private val REQUIRED_REMOTE_FILES = listOf(
             FILE_SCRIPT to "cpft_script.js",
             FILE_OPTIONS_HTML to "cpft_options.html",
             FILE_OPTIONS_JS to "cpft_options.js",
@@ -89,21 +100,38 @@ class ControlPanelInjector(
 
     suspend fun getOptionsBundle(): CpftOptionsBundle = withContext(Dispatchers.IO) {
         var html = readCacheFile("cpft_options.html")
-        if (html == null) {
-            installRelease(DEFAULT_FALLBACK_TAG)
+        val needsModuleRepair = html != null &&
+            html.contains("""type="module"""") &&
+            OPTIONS_MODULE_FILES.any { (_, cacheName) -> readCacheFile(cacheName) == null }
+
+        if (html == null || needsModuleRepair) {
+            val targetTag = getCurrentVersion()
+            if (!installRelease(targetTag) && targetTag != DEFAULT_FALLBACK_TAG) {
+                installRelease(DEFAULT_FALLBACK_TAG)
+            }
             html = readCacheFile("cpft_options.html")
         }
         val js = readCacheFile("cpft_options.js") ?: ""
         val css = readCacheFile("cpft_options.css") ?: ""
         val ja = readCacheFile("cpft_messages_ja.json") ?: "{}"
         val en = readCacheFile("cpft_messages_en.json") ?: "{}"
+        val modules = buildMap {
+            for ((remotePath, cacheName) in OPTIONS_MODULE_FILES) {
+                val content = readCacheFile(cacheName)
+                if (content != null) {
+                    put("/$remotePath", content)
+                }
+            }
+        }
 
         CpftOptionsBundle(
+            version = getCurrentVersion(),
             optionsHtml = html ?: "<!DOCTYPE html><html><body><p>Failed to load CPFT options.</p></body></html>",
             optionsJs = js,
             optionsCss = css,
             messagesJa = ja,
-            messagesEn = en
+            messagesEn = en,
+            moduleFiles = modules
         )
     }
 
@@ -155,7 +183,7 @@ class ControlPanelInjector(
         Log.d(TAG, "Starting CPFT installation for release tag: $tag")
         val downloadedFiles = mutableMapOf<String, String>()
 
-        for ((remotePath, cacheName) in ALL_REMOTE_FILES) {
+        for ((remotePath, cacheName) in REQUIRED_REMOTE_FILES) {
             val url = "$RAW_BASE_URL/$tag/$remotePath"
             val content = downloadUrl(url)
             if (content == null) {
@@ -165,10 +193,30 @@ class ControlPanelInjector(
             downloadedFiles[cacheName] = content
         }
 
-        // Write all downloaded files atomically into cache
+        val optionsHtml = downloadedFiles["cpft_options.html"].orEmpty()
+        val usesEsModules = optionsHtml.contains("""type="module"""")
+        if (usesEsModules) {
+            for ((remotePath, cacheName) in OPTIONS_MODULE_FILES) {
+                val url = "$RAW_BASE_URL/$tag/$remotePath"
+                val content = downloadUrl(url)
+                if (content == null) {
+                    Log.e(TAG, "Failed to download module $url - aborting install of $tag")
+                    return@withContext false
+                }
+                downloadedFiles[cacheName] = content
+            }
+        }
+
+        // Write all downloaded files into cache
         for ((cacheName, content) in downloadedFiles) {
             File(context.filesDir, cacheName).writeText(content)
             memoryCache[cacheName] = content
+        }
+        if (!usesEsModules) {
+            for ((_, cacheName) in OPTIONS_MODULE_FILES) {
+                File(context.filesDir, cacheName).delete()
+                memoryCache.remove(cacheName)
+            }
         }
 
         setCurrentVersion(tag)

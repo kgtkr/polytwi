@@ -1,5 +1,8 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
 plugins {
     id("com.android.application")
@@ -22,10 +25,19 @@ android {
         localProperties.load(FileInputStream(localPropertiesFile))
     }
 
+    // Default versionCode is Unix timestamp in seconds (monotonically increasing, safely under 2^31 - 1)
+    val now = Instant.now()
+    val defaultVersionCode = now.epochSecond.toInt()
+    val defaultVersionName = DateTimeFormatter.ofPattern("yyyy.MM.dd-HHmm")
+        .withZone(ZoneOffset.UTC)
+        .format(now)
+
     val customVersionCode = project.findProperty("versionCode")?.toString()?.toIntOrNull()
-        ?: System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
+        ?: System.getenv("VERSION_CODE")?.toIntOrNull()
+        ?: defaultVersionCode
     val customVersionName = project.findProperty("versionName")?.toString()
-        ?: System.getenv("VERSION_NAME") ?: "1.0"
+        ?: System.getenv("VERSION_NAME")
+        ?: defaultVersionName
     val pushBridgeUrl = (project.findProperty("pushBridgeUrl")?.toString()
         ?: System.getenv("PUSH_BRIDGE_URL")
         ?: localProperties.getProperty("pushBridgeUrl")
