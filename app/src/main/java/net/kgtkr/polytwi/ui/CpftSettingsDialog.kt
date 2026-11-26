@@ -247,75 +247,52 @@ fun CpftSettingsDialog(
                                             ByteArrayInputStream(ByteArray(0))
                                         )
                                     }
-                                    val path = url.path
+                                    val path = url.path ?: ""
                                     val corsHeaders = mapOf(
                                         "Access-Control-Allow-Origin" to "https://cpft-options.local"
                                     )
-                                    return when (path) {
-                                        "/options.html" -> {
-                                            val fullHtml = buildInjectedOptionsHtml(bundle, isDark, bridgeToken)
-                                            WebResourceResponse(
-                                                "text/html",
-                                                "UTF-8",
-                                                200,
-                                                "OK",
-                                                corsHeaders,
-                                                ByteArrayInputStream(fullHtml.toByteArray(Charsets.UTF_8))
-                                            )
-                                        }
-                                        "/options.css" -> {
-                                            WebResourceResponse(
-                                                "text/css",
-                                                "UTF-8",
-                                                200,
-                                                "OK",
-                                                corsHeaders,
-                                                ByteArrayInputStream(bundle.optionsCss.toByteArray(Charsets.UTF_8))
-                                            )
-                                        }
-                                        "/options.js" -> {
-                                            WebResourceResponse(
-                                                "application/javascript",
-                                                "UTF-8",
-                                                200,
-                                                "OK",
-                                                corsHeaders,
-                                                ByteArrayInputStream(bundle.optionsJs.toByteArray(Charsets.UTF_8))
-                                            )
-                                        }
-                                        "/options-icon.png" -> {
-                                            WebResourceResponse(
-                                                "image/svg+xml",
-                                                "UTF-8",
-                                                200,
-                                                "OK",
-                                                corsHeaders,
-                                                ByteArrayInputStream(TWITTER_BIRD_SVG.toByteArray(Charsets.UTF_8))
-                                            )
-                                        }
-                                        else -> {
-                                            val moduleContent = path?.let { bundle.moduleFiles[it] }
-                                            if (moduleContent != null) {
-                                                WebResourceResponse(
-                                                    "application/javascript",
-                                                    "UTF-8",
-                                                    200,
-                                                    "OK",
-                                                    corsHeaders,
-                                                    ByteArrayInputStream(moduleContent.toByteArray(Charsets.UTF_8))
-                                                )
-                                            } else {
-                                                WebResourceResponse(
-                                                    "text/plain",
-                                                    "UTF-8",
-                                                    404,
-                                                    "Not Found",
-                                                    emptyMap(),
-                                                    ByteArrayInputStream(ByteArray(0))
-                                                )
-                                            }
-                                        }
+                                    if (path == "/options.html") {
+                                        val fullHtml = buildInjectedOptionsHtml(bundle, isDark, bridgeToken)
+                                        return WebResourceResponse(
+                                            "text/html",
+                                            "UTF-8",
+                                            200,
+                                            "OK",
+                                            corsHeaders,
+                                            ByteArrayInputStream(fullHtml.toByteArray(Charsets.UTF_8))
+                                        )
                                     }
+                                    val bytes = controlPanelInjector.readReleaseFile(path)
+                                    if (bytes != null) {
+                                        val mimeType = guessMimeType(path)
+                                        val encoding = if (mimeType.startsWith("text/") || mimeType == "application/javascript" || mimeType == "application/json" || mimeType == "image/svg+xml") "UTF-8" else null
+                                        return WebResourceResponse(
+                                            mimeType,
+                                            encoding,
+                                            200,
+                                            "OK",
+                                            corsHeaders,
+                                            ByteArrayInputStream(bytes)
+                                        )
+                                    }
+                                    if (path == "/options-icon.png") {
+                                        return WebResourceResponse(
+                                            "image/svg+xml",
+                                            "UTF-8",
+                                            200,
+                                            "OK",
+                                            corsHeaders,
+                                            ByteArrayInputStream(TWITTER_BIRD_SVG.toByteArray(Charsets.UTF_8))
+                                        )
+                                    }
+                                    return WebResourceResponse(
+                                        "text/plain",
+                                        "UTF-8",
+                                        404,
+                                        "Not Found",
+                                        emptyMap(),
+                                        ByteArrayInputStream(ByteArray(0))
+                                    )
                                 }
                             }
                             val targetTag = "${reloadTrigger}_${isDark}"
@@ -342,7 +319,7 @@ fun CpftSettingsDialog(
             onConfirmUpdate = {
                 isApplyingUpdate = true
                 coroutineScope.launch {
-                    val success = controlPanelInjector.installRelease(release.tagName)
+                    val success = controlPanelInjector.installRelease(release.tagName, release.assetDownloadUrl)
                     isApplyingUpdate = false
                     if (success) {
                         Toast.makeText(
@@ -365,6 +342,24 @@ fun CpftSettingsDialog(
                 if (!isApplyingUpdate) pendingUpdate = null
             }
         )
+    }
+}
+
+private fun guessMimeType(path: String): String {
+    val lower = path.lowercase()
+    return when {
+        lower.endsWith(".js") || lower.endsWith(".mjs") -> "application/javascript"
+        lower.endsWith(".css") -> "text/css"
+        lower.endsWith(".html") || lower.endsWith(".htm") -> "text/html"
+        lower.endsWith(".json") -> "application/json"
+        lower.endsWith(".svg") -> "image/svg+xml"
+        lower.endsWith(".png") -> "image/png"
+        lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+        lower.endsWith(".webp") -> "image/webp"
+        lower.endsWith(".ico") -> "image/x-icon"
+        lower.endsWith(".woff2") -> "font/woff2"
+        lower.endsWith(".woff") -> "font/woff"
+        else -> "application/octet-stream"
     }
 }
 

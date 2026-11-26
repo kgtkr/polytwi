@@ -359,7 +359,7 @@ class MainActivity : ComponentActivity() {
                 onConfirmUpdate = {
                     isApplyingCpftUpdate = true
                     coroutineScope.launch {
-                        val success = app.controlPanelInjector.installRelease(release.tagName)
+                        val success = app.controlPanelInjector.installRelease(release.tagName, release.assetDownloadUrl)
                         isApplyingCpftUpdate = false
                         if (success) {
                             Toast.makeText(
